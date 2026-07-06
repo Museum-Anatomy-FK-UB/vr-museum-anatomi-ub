@@ -1,1 +1,38 @@
+# Konteks & tooling AI (lokal, tidak di-share)
 CLAUDE.md
+/.claude/
+
+# Dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# Next.js
+/.next/
+/out/
+next-env.d.ts
+
+# Production build
+/build
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# Debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+*.pem
+.vscode/
+.idea/
+
+# Aset 360° resolusi tinggi — JANGAN commit ke Git (pakai storage server).
+# Folder & README tetap di-track; file gambarnya diabaikan.
+/public/panorama/*
+!/public/panorama/.gitkeep
+!/public/panorama/README.md
