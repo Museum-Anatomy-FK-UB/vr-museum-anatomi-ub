@@ -18,6 +18,7 @@ declare global {
       'a-text': AFrameElement;
       'a-circle': AFrameElement;
       'a-ring': AFrameElement;
+      'a-triangle': AFrameElement;
       'a-image': AFrameElement;
       'a-plane': AFrameElement;
       'a-assets': AFrameElement;

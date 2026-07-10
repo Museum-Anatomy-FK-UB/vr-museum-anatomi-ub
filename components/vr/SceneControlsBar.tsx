@@ -32,6 +32,15 @@ function FullscreenIcon() {
   );
 }
 
+function MapIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={ICON}>
+      <path d="M9 4 3 6.2v13.6L9 17.6l6 2.2 6-2.2V6.2L15 8.4 9 6.2Z" />
+      <path d="M9 4v13.6M15 8.4V22" />
+    </svg>
+  );
+}
+
 function EyeIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={ICON}>
@@ -52,10 +61,12 @@ function EyeOffIcon() {
 function ControlButton({
   label,
   onClick,
+  active,
   children,
 }: {
   label: string;
   onClick: () => void;
+  active?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -64,7 +75,10 @@ function ControlButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="flex w-[76px] flex-col items-center gap-1 rounded-lg px-2 py-2 text-white/90 transition hover:bg-white/15 hover:text-white"
+      aria-pressed={active}
+      className={`flex w-[76px] flex-col items-center gap-1 rounded-lg px-2 py-2 transition ${
+        active ? 'bg-white/20 text-white' : 'text-white/90 hover:bg-white/15 hover:text-white'
+      }`}
     >
       {children}
       <span className="text-[10px] font-medium leading-none">{label}</span>
@@ -75,12 +89,16 @@ function ControlButton({
 export default function SceneControlsBar({
   onMainLocation,
   onOpenGallery,
+  onToggleFloorplan,
+  floorplanOpen,
   onToggleFullscreen,
   hotspotsVisible,
   onToggleHotspots,
 }: {
   onMainLocation: () => void;
   onOpenGallery: () => void;
+  onToggleFloorplan: () => void;
+  floorplanOpen: boolean;
   onToggleFullscreen: () => void;
   hotspotsVisible: boolean;
   onToggleHotspots: () => void;
@@ -93,6 +111,9 @@ export default function SceneControlsBar({
         </ControlButton>
         <ControlButton label="All Location" onClick={onOpenGallery}>
           <GridIcon />
+        </ControlButton>
+        <ControlButton label="Denah" onClick={onToggleFloorplan} active={floorplanOpen}>
+          <MapIcon />
         </ControlButton>
         <ControlButton label="Fullscreen" onClick={onToggleFullscreen}>
           <FullscreenIcon />

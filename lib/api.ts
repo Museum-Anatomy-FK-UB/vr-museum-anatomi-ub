@@ -9,7 +9,8 @@ import { mockScenes, mockSceneList } from '@/lib/mock/scenes';
 import { mockCollections } from '@/lib/mock/collections';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
-const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === 'true' || !BASE_URL;
+/** true = pakai mock lokal (lib/mock). Aktif jika di-set eksplisit atau BASE_URL kosong. */
+export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === 'true' || !BASE_URL;
 
 /** Simulasi latensi jaringan supaya loading state ikut teruji saat mock. */
 function mock<T>(value: T, ms = 250): Promise<T> {
