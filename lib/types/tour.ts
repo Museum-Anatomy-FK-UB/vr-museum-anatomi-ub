@@ -3,6 +3,9 @@
 
 export type HotspotType = 'navigation' | 'info';
 
+/** Arah panah untuk hotspot navigasi (default 'up'). */
+export type HotspotArrow = 'up' | 'down' | 'left' | 'right';
+
 interface BaseHotspot {
   id: string;
   type: HotspotType;
@@ -11,6 +14,8 @@ interface BaseHotspot {
   /** Rotasi vertikal (derajat), -90..90 */
   pitch: number;
   label: string;
+  /** Arah panah (hanya navigasi). Default 'up'. */
+  arrow?: HotspotArrow;
 }
 
 /** Hotspot pindah ke ruang lain */
@@ -33,6 +38,9 @@ export interface SceneSummary {
   title: string;
   thumbnail_url: string;
   order: number;
+  /** Posisi pada denah museum, persen 0–100 (opsional; untuk overlay FloorplanMap) */
+  map_x?: number;
+  map_y?: number;
 }
 
 /** Detail scene + hotspot (GET /api/vr/scenes/:sceneId) */

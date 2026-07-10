@@ -155,3 +155,5 @@ Data ini **sama** dengan yang dipakai Web Portal & Multimedia App
 - [ ] Apakah `panorama_url` butuh varian multi-resolusi (tiling) untuk foto
       resolusi sangat tinggi? (tunggu kepastian resolusi foto dari tim FK)
 - [ ] Skema autentikasi jika nanti ada konten khusus mahasiswa FK
+- [ ] Koordinat denah/floorplan per scene (mis. `map_x`, `map_y` dalam persen 0–100)
+      untuk overlay peta museum. Sementara pakai placeholder di frontend.

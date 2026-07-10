@@ -1,6 +1,8 @@
 'use client';
 
 import { useCollection } from '@/lib/hooks/useCollection';
+import MediaGallery from '@/components/ui/MediaGallery';
+import AudioPlayer from '@/components/ui/AudioPlayer';
 
 // Panel info koleksi yang slide-up dari bawah saat hotspot 'info' diklik.
 // Data koleksi diambil dari API (via SWR) — tidak ada hardcode.
@@ -45,23 +47,15 @@ export default function HotspotInfo({
 
       {collection && (
         <div className="mt-3 space-y-3">
-          {collection.photos[0] && (
-            <div className="overflow-hidden rounded-lg bg-neutral-100">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={collection.photos[0].url}
-                alt={collection.photos[0].caption ?? collection.name}
-                className="h-44 w-full object-cover"
-              />
-            </div>
-          )}
+          <MediaGallery photos={collection.photos} alt={collection.name} />
 
           <p className="text-sm leading-relaxed text-neutral-700">{collection.description}</p>
 
           {collection.audio_url && (
-            <audio controls src={collection.audio_url} className="w-full">
-              Browser Anda tidak mendukung pemutar audio.
-            </audio>
+            <div className="space-y-1">
+              <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">Voice over</p>
+              <AudioPlayer src={collection.audio_url} />
+            </div>
           )}
 
           {collection.portal_url && (

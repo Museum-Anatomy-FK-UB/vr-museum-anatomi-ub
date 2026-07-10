@@ -15,8 +15,10 @@ export const mockCollections: Record<string, Collection> = {
     photos: [
       { url: 'https://picsum.photos/seed/skull1/640/480', caption: 'Tampak depan' },
       { url: 'https://picsum.photos/seed/skull2/640/480', caption: 'Tampak samping' },
+      { url: 'https://picsum.photos/seed/skull3/640/480', caption: 'Tampak bawah' },
     ],
-    audio_url: null,
+    // Placeholder voice-over (silence dari CDN) untuk uji AudioPlayer — ganti dgn audio asli FK.
+    audio_url: 'https://cdn.jsdelivr.net/gh/anars/blank-audio/10-seconds-of-silence.mp3',
     video_url: null,
     portal_url: 'https://museumanatomi.ub.ac.id/koleksi/skull-001',
   },
