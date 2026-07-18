@@ -1,9 +1,9 @@
-// Komponen A-Frame 'idle-rotate': kamera auto-muter pelan saat idle (attract mode
-// ala kiosk museum). Berhenti saat user berinteraksi (drag/scroll/keyboard), dan
-// nonaktif di mode VR. Kecepatan di-ease-in supaya mulai halus, tidak menyentak.
+// A-Frame 'idle-rotate' component: the camera slowly auto-rotates when idle (a
+// museum-kiosk attract mode). It stops when the user interacts (drag/scroll/keyboard),
+// and is disabled in VR mode. The speed eases in so it starts smoothly, not abruptly.
 //
-// Deteksi idle: hover mouse (tanpa klik) TIDAK menghentikan — hanya drag/interaksi
-// nyata yang reset timer, jadi tur tetap berputar saat ditinggal.
+// Idle detection: mouse hover (without clicking) does NOT stop it — only a real
+// drag/interaction resets the timer, so the tour keeps rotating when left alone.
 export function registerIdleRotate() {
   const AFRAME =
     typeof window !== 'undefined' ? (window as unknown as { AFRAME?: any }).AFRAME : undefined;
@@ -11,10 +11,10 @@ export function registerIdleRotate() {
 
   AFRAME.registerComponent('idle-rotate', {
     schema: {
-      speed: { default: 0.09 }, // radian per detik (kecepatan penuh)
-      delay: { default: 4000 }, // ms idle sebelum mulai
-      ramp: { default: 1200 }, // ms ease-in dari diam ke kecepatan penuh
-      enabled: { default: true }, // dimatikan mis. saat mode Pick koordinat
+      speed: { default: 0.09 }, // radians per second (full speed)
+      delay: { default: 4000 }, // ms of idle before it starts
+      ramp: { default: 1200 }, // ms ease-in from rest to full speed
+      enabled: { default: true }, // disabled e.g. during Pick coordinate mode
     },
 
     init(this: any) {
@@ -24,7 +24,7 @@ export function registerIdleRotate() {
       this.rotating = false;
       this.rotateStart = 0;
 
-      // Reset timer idle + hentikan rotasi.
+      // Reset the idle timer + stop rotating.
       this.bump = () => {
         this.lastActive = performance.now();
         this.rotating = false;
@@ -37,7 +37,7 @@ export function registerIdleRotate() {
         this.pointerDown = false;
         this.bump();
       };
-      // Gerakan mouse hanya reset kalau sedang drag (tombol ditekan).
+      // Mouse movement only resets while dragging (a button is held down).
       this.onMove = () => {
         if (this.pointerDown) this.bump();
       };
@@ -92,13 +92,13 @@ export function registerIdleRotate() {
         this.rotateStart = now;
       }
 
-      // 1) Recenter pandangan ke horizon dulu: ease pitch → 0 (kalau lagi nunduk/nengadah).
+      // 1) Recenter the view to the horizon first: ease pitch → 0 (if looking down/up).
       const pitch = lookControls.pitchObject.rotation.x;
-      const k = 1 - Math.exp(-dt / 250); // eksponensial, ~0.7s ke tengah
+      const k = 1 - Math.exp(-dt / 250); // exponential, ~0.7s to center
       lookControls.pitchObject.rotation.x = pitch + (0 - pitch) * k;
 
-      // 2) Putar yaw dengan ease-in, TAPI baru terasa penuh setelah mendekati level
-      //    (jadi "balik ke tengah lalu muter", bukan langsung muter miring).
+      // 2) Rotate yaw with ease-in, BUT only reach full speed once near level
+      //    (so it "returns to center then rotates", not rotating while tilted).
       const levelThreshold = (12 * Math.PI) / 180; // 12°
       const level = Math.max(0, 1 - Math.abs(lookControls.pitchObject.rotation.x) / levelThreshold);
       const r = Math.min(1, (now - this.rotateStart) / this.data.ramp);

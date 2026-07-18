@@ -1,7 +1,7 @@
 import type { Collection } from '@/lib/types/collection';
 
-// Mock data koleksi untuk development sebelum API backend siap.
-// collection_id di sini harus konsisten dengan collection_id di lib/mock/scenes.ts.
+// Mock collection data for development before the backend API is ready.
+// collection_id here must stay consistent with collection_id in lib/mock/scenes.ts.
 export const mockCollections: Record<string, Collection> = {
   'skull-001': {
     id: 'skull-001',
@@ -17,7 +17,7 @@ export const mockCollections: Record<string, Collection> = {
       { url: 'https://picsum.photos/seed/skull2/640/480', caption: 'Tampak samping' },
       { url: 'https://picsum.photos/seed/skull3/640/480', caption: 'Tampak bawah' },
     ],
-    // Placeholder voice-over (silence dari CDN) untuk uji AudioPlayer — ganti dgn audio asli FK.
+    // Placeholder voice-over (silence from a CDN) to test AudioPlayer — replace with real FK audio.
     audio_url: 'https://cdn.jsdelivr.net/gh/anars/blank-audio/10-seconds-of-silence.mp3',
     video_url: null,
     portal_url: 'https://museumanatomi.ub.ac.id/koleksi/skull-001',

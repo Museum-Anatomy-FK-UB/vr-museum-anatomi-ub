@@ -1,109 +1,112 @@
 # vr-museum-anatomi-ub
 
-Web Virtual Museum 360° — bagian dari Ekosistem Digital Museum Anatomi Fakultas Kedokteran Universitas Brawijaya.
+360° Web Virtual Museum — part of the Digital Ecosystem of the Anatomy Museum, Faculty of Medicine, Universitas Brawijaya.
 
-Aplikasi ini memungkinkan pengguna menjelajahi seluruh ruangan Museum Anatomi FK UB secara virtual melalui browser, kapan saja dan di mana saja, tanpa perlu mengunjungi lokasi fisik. Hotspot interaktif menampilkan informasi koleksi anatomi yang diambil secara dinamis dari database terpusat ekosistem.
+This app lets users explore every room of the FK UB Anatomy Museum virtually through the browser, anytime and anywhere, without visiting the physical location. Interactive hotspots surface anatomy collection information pulled dynamically from the ecosystem's centralized database.
 
-> **Status:** Tahap perencanaan / proposal — belum mulai development.
+> **Status:** In development — an interactive proof-of-concept is built (mock-data driven); pending the real backend API and production assets.
 > **PIC:** Anak Agung Ngurah Aditya Wirayudha
-> **Bagian dari:** [Ekosistem Digital Museum Anatomi FK UB](https://museumanatomi.ub.ac.id) — Lab MGM FILKOM UB
+> **Part of:** [Digital Ecosystem of the FK UB Anatomy Museum](https://museumanatomi.ub.ac.id) — MGM Lab, FILKOM UB
 
 ---
 
-## Fitur Utama
+## Key Features
 
-- Tur Virtual 360° multi-ruang (Lobby, Anatomi Dasar, Osteologi, Organ Dalam, Histologi, Embriologi)
-- Navigasi antar ruang via hotspot dan peta/denah museum
-- Hotspot informasi koleksi — foto, deskripsi, voice over, link ke Web Portal
-- Mode VR (WebXR / Google Cardboard) via tombol toggle
-- URL unik per ruang (`/vr/osteologi`) — dapat di-share dan di-bookmark
-- Semua konten dikelola dari CMS terpusat, tidak hardcode
+- Multi-room 360° virtual tour (Lobby, Basic Anatomy, Osteology, Internal Organs, Histology, Embryology)
+- Room-to-room navigation via hotspots and a museum floor plan / map
+- Collection info hotspots — photos, description, voice-over, and a link to the Web Portal
+- VR Mode (WebXR / Google Cardboard) via a toggle button
+- A unique URL per room (`/vr/osteologi`) — shareable and bookmarkable
+- All content managed from a centralized CMS, never hardcoded
 
 ---
 
 ## Tech Stack
 
-| Layer | Teknologi |
+| Layer | Technology |
 |---|---|
 | Framework | Next.js 14 (App Router) |
 | VR / 360° Engine | A-Frame 1.5+ |
-| 3D Renderer | Three.js (dependency A-Frame) |
+| 3D Renderer | Three.js (A-Frame dependency) |
 | Styling | Tailwind CSS |
 | Data Fetching | SWR + Fetch API |
-| Backend / API | Laravel REST API (dikembangkan tim Backend) |
-| Database | MySQL (terpusat, shared dgn seluruh ekosistem) |
-| Deployment | Nginx — Server UB (`vr.museumanatomi.ub.ac.id`) |
+| Backend / API | Laravel REST API (built by the Backend team) |
+| Database | MySQL (centralized, shared across the whole ecosystem) |
+| Deployment | Nginx — UB Server (`vr.museumanatomi.ub.ac.id`) |
 
 ---
 
-## Struktur Folder
+## Folder Structure
 
-Lihat [`docs/STRUCTURE.md`](docs/STRUCTURE.md) untuk panduan lengkap.
+See [`docs/STRUCTURE.md`](docs/STRUCTURE.md) for the full guide.
 
 ```
 vr-museum-anatomi-ub/
-├── app/                  # Next.js App Router (halaman & layout)
-├── components/           # Komponen React / A-Frame
-├── lib/                  # Utility, API client, hooks
-├── public/               # Aset statis (placeholder 360°, dll)
-├── docs/                 # Dokumentasi teknis
+├── app/                  # Next.js App Router (pages & layout)
+├── components/           # React / A-Frame components
+├── lib/                  # Utilities, API client, hooks
+├── public/               # Static assets (360° placeholders, etc.)
+├── docs/                 # Technical documentation
 └── ...
 ```
 
 ---
 
-## Dokumentasi
+## Documentation
 
-| File | Isi |
+| File | Contents |
 |---|---|
-| [`docs/STRUCTURE.md`](docs/STRUCTURE.md) | Panduan struktur folder & konvensi kode |
-| [`docs/API.md`](docs/API.md) | Kontrak endpoint API (untuk align dgn tim Backend) |
-| [`CLAUDE.md`](CLAUDE.md) | Konteks project untuk AI assistant |
+| [`docs/STRUCTURE.md`](docs/STRUCTURE.md) | Folder structure guide & code conventions |
+| [`docs/API.md`](docs/API.md) | API endpoint contract (to align with the Backend team) |
+| [`CLAUDE.md`](CLAUDE.md) | Project context for the AI assistant |
 
 ---
 
-## Setup Development
+## Development Setup
 
-> Prasyarat: Node.js 18+, npm / pnpm
+> Prerequisites: Node.js 18+, npm / pnpm
 
 ```bash
-# 1. Clone repository
+# 1. Clone the repository
 git clone <repo-url>
 cd vr-museum-anatomi-ub
 
 # 2. Install dependencies
 npm install
 
-# 3. Salin file environment
+# 3. Copy the environment file
 cp .env.example .env.local
-# Edit .env.local — isi API_BASE_URL dll
+# Edit .env.local — set API_BASE_URL, etc.
 
-# 4. Jalankan development server
+# 4. Run the development server
 npm run dev
-# Buka http://localhost:3000
+# Open http://localhost:3000
 ```
 
 ### Environment Variables
 
 ```env
 # .env.local
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api    # URL API backend (lokal)
-NEXT_PUBLIC_STORAGE_URL=http://localhost:8000/storage # URL file storage
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api    # Backend API URL (local)
+NEXT_PUBLIC_STORAGE_URL=http://localhost:8000/storage # File storage URL
+NEXT_PUBLIC_USE_MOCK=true                             # Use local mock data (lib/mock)
 ```
+
+While `NEXT_PUBLIC_USE_MOCK=true` (or `NEXT_PUBLIC_API_BASE_URL` is empty), the app serves data from `lib/mock/` instead of the backend. Set it to `false` once the API is live.
 
 ---
 
 ## Build & Deploy
 
 ```bash
-# Build production
+# Production build
 npm run build
 
-# Jalankan production server (lokal)
+# Run the production server (local)
 npm run start
 ```
 
-Deployment ke server UB menggunakan Nginx. Detail konfigurasi menyusul setelah server siap.
+Deployment to the UB server uses Nginx. Configuration details will follow once the server is ready.
 
 ---
 
@@ -112,43 +115,43 @@ Deployment ke server UB menggunakan Nginx. Detail konfigurasi menyusul setelah s
 Branch convention:
 ```
 main          → production-ready (protected)
-develop       → integrasi semua fitur
-feature/xxx   → fitur baru (contoh: feature/hotspot-info)
-fix/xxx       → bugfix (contoh: fix/vr-mode-mobile)
+develop       → integration of all features
+feature/xxx   → new feature (e.g. feature/hotspot-info)
+fix/xxx       → bugfix (e.g. fix/vr-mode-mobile)
 ```
 
-Cara kontribusi:
+How to contribute:
 ```bash
-# 1. Buat branch dari develop
+# 1. Create a branch from develop
 git checkout develop
 git pull origin develop
-git checkout -b feature/nama-fitur
+git checkout -b feature/feature-name
 
-# 2. Kerjakan fitur, commit dengan pesan yang jelas
-git commit -m "feat: tambah hotspot navigasi antar ruang"
+# 2. Work on the feature, commit with clear messages
+git commit -m "feat: add room-to-room navigation hotspot"
 
-# 3. Push dan buat Pull Request ke develop
-git push origin feature/nama-fitur
+# 3. Push and open a Pull Request into develop
+git push origin feature/feature-name
 ```
 
 Commit message convention:
 ```
-feat:     fitur baru
+feat:     new feature
 fix:      bugfix
-chore:    setup, konfigurasi
-docs:     perubahan dokumentasi
-refactor: refactor kode (bukan fitur baru / bukan bugfix)
+chore:    setup, configuration
+docs:     documentation changes
+refactor: code refactor (not a new feature / not a bugfix)
 ```
 
 ---
 
-## Tim
+## Team
 
-| Nama | Peran | Scope |
+| Name | Role | Scope |
 |---|---|---|
-| Dr. Eng. Herman Tolle | Project Manager / Koordinator | Seluruh ekosistem |
-| Azarya Aria Alfathan | Lead Developer | Seluruh ekosistem / AR |
-| **Anak Agung Ngurah Aditya Wirayudha** | **PIC Web VR** | **Repo ini** |
+| Dr. Eng. Herman Tolle | Project Manager / Coordinator | Whole ecosystem |
+| Azarya Aria Alfathan | Lead Developer | Whole ecosystem / AR |
+| **Anak Agung Ngurah Aditya Wirayudha** | **Web VR PIC** | **This repo** |
 | Ahmad Akmal Syafi'i | Web Developer | VR / DB & Backend |
 | Azkal Baihaq | Web Developer | AR / DB & Backend |
 | Bintang Ula Nur Maghfiroh | Web Developer | Website Portal |
@@ -158,18 +161,18 @@ refactor: refactor kode (bukan fitur baru / bukan bugfix)
 
 ---
 
-## Ekosistem Digital Museum Anatomi FK UB
+## FK UB Anatomy Museum Digital Ecosystem
 
-Repo ini adalah **satu bagian** dari ekosistem yang lebih besar:
+This repo is **one part** of a larger ecosystem:
 
-| Produk | URL | PIC |
+| Product | URL | PIC |
 |---|---|---|
 | Website Portal | `museumanatomi.ub.ac.id` | Bintang Ula |
-| **Web VR Tour 360°** | `vr.museumanatomi.ub.ac.id` | **Aditya** |
-| Web AR Dinamis | `ar.museumanatomi.ub.ac.id` | Azarya |
-| Aplikasi Multimedia | — | Belva |
+| **360° Web VR Tour** | `vr.museumanatomi.ub.ac.id` | **Aditya** |
+| Dynamic Web AR | `ar.museumanatomi.ub.ac.id` | Azarya |
+| Multimedia App | — | Belva |
 | Backend / API / DB | — | Azkal / Akmal |
 
 ---
 
-*Dikembangkan oleh Lab MGM (Multimedia & Game Technology) — Fakultas Ilmu Komputer, Universitas Brawijaya*
+*Developed by MGM Lab (Multimedia & Game Technology) — Faculty of Computer Science, Universitas Brawijaya*

@@ -1,8 +1,8 @@
 'use client';
 
-// Tombol masuk mode VR (WebXR / Google Cardboard) — requirement wajib proposal.
-// Memanggil enterVR() milik <a-scene> A-Frame. A-Frame juga menyediakan tombol
-// bawaan (goggles), tombol ini sekadar entry point yang lebih jelas untuk user.
+// Button to enter VR mode (WebXR / Google Cardboard) — a mandatory proposal requirement.
+// Calls the A-Frame <a-scene>'s enterVR(). A-Frame also provides a built-in button
+// (goggles); this is just a clearer entry point for the user.
 export default function VRModeButton() {
   const enterVR = () => {
     const scene = document.querySelector('a-scene') as (HTMLElement & { enterVR?: () => void }) | null;

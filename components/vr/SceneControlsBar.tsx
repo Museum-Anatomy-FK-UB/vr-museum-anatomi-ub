@@ -1,7 +1,7 @@
 'use client';
 
-// Footer control bar ala 3DVista/FILKOM: Main Location, All Location,
-// Toggle Fullscreen, Show/Hide Hotspot. Ikon = inline SVG (tanpa dependency baru).
+// Footer control bar, 3DVista/FILKOM-style: Main Location, All Location,
+// Toggle Fullscreen, Show/Hide Hotspot. Icons = inline SVG (no new dependency).
 
 const ICON = 'h-5 w-5';
 

@@ -1,6 +1,6 @@
-// Deklarasi elemen A-Frame supaya bisa dipakai sebagai JSX di TSX.
-// A-Frame memasang custom element (<a-scene>, <a-sky>, dll) saat runtime;
-// TypeScript tidak tahu tag ini tanpa deklarasi berikut.
+// A-Frame element declarations so they can be used as JSX in TSX.
+// A-Frame registers custom elements (<a-scene>, <a-sky>, etc.) at runtime;
+// TypeScript doesn't know these tags without the declarations below.
 import type { DetailedHTMLProps, HTMLAttributes } from 'react';
 
 type AFrameElement = DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> & {

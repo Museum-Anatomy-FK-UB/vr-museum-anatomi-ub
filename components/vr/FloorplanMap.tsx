@@ -2,8 +2,8 @@
 
 import type { SceneSummary } from '@/lib/types/tour';
 
-// Overlay denah museum (placeholder) — titik per ruang, klik → pindah ruang.
-// Posisi titik dari map_x/map_y (persen). Denah asli menyusul dari FK/API.
+// Museum floor plan overlay (placeholder) — a dot per room, click → switch room.
+// Dot positions come from map_x/map_y (percent). The real floor plan comes later from FK/API.
 export default function FloorplanMap({
   scenes,
   currentId,
@@ -38,7 +38,7 @@ export default function FloorplanMap({
       </div>
 
       <div className="relative aspect-[4/3] w-full overflow-hidden rounded-lg border border-white/20 bg-neutral-700/40">
-        {/* Garis outline placeholder */}
+        {/* Placeholder outline */}
         <div className="absolute inset-3 rounded border border-dashed border-white/15" />
 
         {withCoords.map((s) => {

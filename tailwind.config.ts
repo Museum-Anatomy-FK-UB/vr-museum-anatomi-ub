@@ -8,7 +8,7 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Warna aksen ekosistem Museum Anatomi (sementara — samakan dgn design system nanti)
+        // Anatomy Museum ecosystem accent color (temporary — align with the design system later)
         brand: {
           DEFAULT: '#0f6e56',
           light: '#1d9e75',

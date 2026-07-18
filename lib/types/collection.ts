@@ -1,5 +1,5 @@
-// Tipe data koleksi — dari kontrak GET /api/collections/:id (docs/API.md).
-// Sumber data SAMA dengan Web Portal & Multimedia (satu sumber, tanpa duplikasi).
+// Collection data types — from the GET /api/collections/:id contract (docs/API.md).
+// SAME data source as the Web Portal & Multimedia (single source, no duplication).
 
 export interface CollectionPhoto {
   url: string;
