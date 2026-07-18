@@ -1,4 +1,4 @@
-// A-Frame tidak menyertakan type declaration sendiri. Diperlakukan sebagai
-// side-effect import — hanya mendaftarkan custom element ke window saat runtime.
-// File ini AMBIENT (tanpa import/export) supaya deklarasi module berlaku global.
+// A-Frame ships no type declarations of its own. It's treated as a side-effect
+// import — it only registers the custom elements on window at runtime.
+// This file is AMBIENT (no import/export) so the module declaration is global.
 declare module 'aframe';

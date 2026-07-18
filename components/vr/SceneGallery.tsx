@@ -2,8 +2,8 @@
 
 import type { SceneSummary } from '@/lib/types/tour';
 
-// Galeri "All Location" — grid thumbnail semua ruang (ala 3DVista/FILKOM).
-// Klik thumbnail → pindah ruang (dengan transisi) lalu tutup galeri.
+// "All Location" gallery — a thumbnail grid of all rooms (3DVista/FILKOM-style).
+// Click a thumbnail → switch room (with transition) then close the gallery.
 export default function SceneGallery({
   scenes,
   currentId,

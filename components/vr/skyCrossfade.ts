@@ -1,8 +1,8 @@
-// Komponen A-Frame 'sky-crossfade': dua lapis sphere (menggantikan <a-sky> tunggal)
-// yang saling di-blend opacity-nya saat pindah scene — panorama LAMA dissolve
-// langsung ke panorama BARU, TANPA melewati hitam. Geometri/orientasi mengikuti
-// persis default <a-sky> A-Frame (radius 500, shader flat/MeshBasicMaterial,
-// side back, scale -1 1 1 utk mirror tekstur) supaya hasil visual identik.
+// A-Frame 'sky-crossfade' component: two sphere layers (replacing a single <a-sky>)
+// whose opacities blend when switching scenes — the OLD panorama dissolves straight
+// into the NEW one, WITHOUT passing through black. Geometry/orientation exactly
+// match A-Frame's default <a-sky> (radius 500, flat shader/MeshBasicMaterial,
+// back side, scale -1 1 1 to mirror the texture) so the visual result is identical.
 export function registerSkyCrossfade() {
   const AFRAME =
     typeof window !== 'undefined' ? (window as unknown as { AFRAME?: any }).AFRAME : undefined;
@@ -11,8 +11,9 @@ export function registerSkyCrossfade() {
   AFRAME.registerComponent('sky-crossfade', {
     schema: {
       radius: { default: 500 },
-      // Jarak dorong bola panorama LAMA ke arah pandang saat blend — efek "maju"
-      // tanpa menyentuh FOV kamera (panorama BARU diam total, tidak ikut zoom).
+      // Distance to push the OLD panorama sphere toward the view during the blend —
+      // a "forward" effect without touching the camera FOV (the NEW panorama stays
+      // completely still, no zoom).
       push: { default: 170 },
     },
 
@@ -28,6 +29,7 @@ export function registerSkyCrossfade() {
           toneMapped: false,
         });
 
+      this.geometry = geometry;
       this.matA = makeMaterial();
       this.matB = makeMaterial();
       this.meshA = new THREE.Mesh(geometry, this.matA);
@@ -35,7 +37,7 @@ export function registerSkyCrossfade() {
       this.meshA.scale.set(-1, 1, 1);
       this.meshB.scale.set(-1, 1, 1);
       this.meshA.renderOrder = 0;
-      this.meshB.renderOrder = 1; // digambar setelah A, urutan blend konsisten
+      this.meshB.renderOrder = 1; // drawn after A, for a consistent blend order
 
       this.el.setObject3D('sky-crossfade-a', this.meshA);
       this.el.setObject3D('sky-crossfade-b', this.meshB);
@@ -43,7 +45,7 @@ export function registerSkyCrossfade() {
       this.loader = new THREE.TextureLoader();
       this.loader.crossOrigin = 'anonymous';
 
-      this.activeIsA = true; // mesh yg lagi tampil penuh (opacity 1)
+      this.activeIsA = true; // the mesh currently shown fully (opacity 1)
       this.currentSrc = null;
       this.fading = false;
     },
@@ -55,9 +57,10 @@ export function registerSkyCrossfade() {
       this.matB.map?.dispose();
       this.matA.dispose();
       this.matB.dispose();
+      this.geometry?.dispose(); // both meshes share one geometry — dispose once
     },
 
-    /** Tampilkan panorama pertama kali — instan (belum ada "lama" utk di-blend). */
+    /** Show the panorama for the first time — instant (there's no "old" one to blend yet). */
     setInitial(this: any, url: string, rotationYDeg: number) {
       const THREE = AFRAME.THREE;
       const active = this.activeIsA ? this.meshA : this.meshB;
@@ -80,7 +83,7 @@ export function registerSkyCrossfade() {
       });
     },
 
-    /** Blend dari panorama saat ini ke panorama baru — dissolve langsung, tanpa hitam. */
+    /** Blend from the current panorama to a new one — direct dissolve, no black. */
     crossfadeTo(this: any, url: string, rotationYDeg: number, duration = 700) {
       const THREE = AFRAME.THREE;
       if (url === this.currentSrc) return Promise.resolve();
@@ -97,7 +100,7 @@ export function registerSkyCrossfade() {
             incoming.material.needsUpdate = true;
             incoming.material.opacity = 0;
             incoming.rotation.y = THREE.MathUtils.degToRad(rotationYDeg || 0);
-            outgoing.material.opacity = 1; // pastikan baseline penuh sebelum di-fade-out
+            outgoing.material.opacity = 1; // ensure full baseline before fading out
 
             this.currentSrc = url;
             this._fadeIncoming = incoming;
@@ -105,9 +108,9 @@ export function registerSkyCrossfade() {
             this._fadeStart = performance.now();
             this._fadeDuration = duration;
 
-            // Efek "maju": tarik bola panorama LAMA ke belakang kamera sehingga
-            // permukaan di depan mendekat (membesar). Arah diambil dari pandangan
-            // kamera SAAT INI. Panorama baru tetap di origin — tidak bergerak.
+            // "Forward" effect: pull the OLD panorama sphere behind the camera so
+            // the surface in front approaches (grows). The direction is taken from
+            // the CURRENT camera view. The new panorama stays at the origin — it doesn't move.
             const cam3 = this.el.sceneEl?.camera;
             if (cam3) {
               const dir = new THREE.Vector3();
@@ -135,8 +138,8 @@ export function registerSkyCrossfade() {
       this._fadeIncoming.material.opacity = t;
       this._fadeOutgoing.material.opacity = 1 - t;
 
-      // Dorong panorama lama ke arah pandang (ease-in: mulai halus lalu melaju —
-      // terasa seperti melangkah maju). Panorama baru tidak disentuh sama sekali.
+      // Push the old panorama toward the view (ease-in: starts gently then speeds
+      // up — feels like stepping forward). The new panorama is not touched at all.
       if (this._pushVec) {
         const eased = t * t;
         this._fadeOutgoing.position.copy(this._pushVec).multiplyScalar(eased);
@@ -145,7 +148,7 @@ export function registerSkyCrossfade() {
       if (t >= 1) {
         this.fading = false;
         this._fadeOutgoing.material.opacity = 0;
-        this._fadeOutgoing.position.set(0, 0, 0); // reset (sudah tak terlihat)
+        this._fadeOutgoing.position.set(0, 0, 0); // reset (already invisible)
         this._pushVec = null;
         this._onFadeDone?.();
         this._onFadeDone = null;

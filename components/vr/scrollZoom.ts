@@ -1,7 +1,7 @@
-// Komponen A-Frame 'scroll-zoom': zoom in/out FOV kamera pakai scroll mouse,
-// dengan smoothing per-frame supaya halus (bukan lompat per notch).
-// Nonaktif di mode VR (headset yang pegang kamera). `cancel()` dipanggil saat
-// transisi pindah ruangan supaya tidak berebut kendali FOV dengan transisi.
+// A-Frame 'scroll-zoom' component: zoom the camera FOV in/out with the mouse wheel,
+// with per-frame smoothing so it's smooth (not a jump per notch).
+// Disabled in VR mode (the headset owns the camera). `cancel()` is called during a
+// room transition so it doesn't fight the transition over FOV control.
 export function registerScrollZoom() {
   const AFRAME =
     typeof window !== 'undefined' ? (window as unknown as { AFRAME?: any }).AFRAME : undefined;
@@ -9,10 +9,10 @@ export function registerScrollZoom() {
 
   AFRAME.registerComponent('scroll-zoom', {
     schema: {
-      min: { default: 40 }, // FOV tersempit (zoom in maksimal)
-      max: { default: 100 }, // FOV terlebar (zoom out maksimal)
-      step: { default: 0.05 }, // derajat FOV per unit deltaY (≈5°/notch)
-      smooth: { default: 90 }, // time-constant smoothing (ms)
+      min: { default: 40 }, // narrowest FOV (max zoom in)
+      max: { default: 100 }, // widest FOV (max zoom out)
+      step: { default: 0.05 }, // FOV degrees per deltaY unit (≈5°/notch)
+      smooth: { default: 90 }, // smoothing time-constant (ms)
     },
 
     init(this: any) {
@@ -40,7 +40,7 @@ export function registerScrollZoom() {
       else sceneEl.addEventListener('render-target-loaded', this.attach, { once: true });
     },
 
-    /** Hentikan aktivitas zoom (dipanggil transisi pindah ruangan). */
+    /** Stop any zoom activity (called by the room transition). */
     cancel(this: any) {
       this.active = false;
       this.target = null;
