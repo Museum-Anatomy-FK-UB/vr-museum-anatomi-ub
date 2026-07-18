@@ -1,10 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // A-Frame mengelola WebGL/DOM secara imperatif dan tidak StrictMode-safe:
-  // double-mount dev menyisakan <a-scene> orphan. Matikan agar scene stabil.
+  // A-Frame manages WebGL/DOM imperatively and is not StrictMode-safe:
+  // the dev double-mount leaves an orphan <a-scene>. Disable it so the scene is stable.
   reactStrictMode: false,
   images: {
-    // Aset 360°/thumbnail diambil dari storage server via URL absolut (lihat docs/API.md)
+    // 360°/thumbnail assets come from the server storage via absolute URLs (see docs/API.md)
     remotePatterns: [
       { protocol: 'https', hostname: '**' },
       { protocol: 'http', hostname: 'localhost' },

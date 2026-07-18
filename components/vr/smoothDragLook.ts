@@ -1,38 +1,34 @@
-// Komponen A-Frame 'smooth-drag-look': drag-to-look (mouse & touch) yang halus
-// ala 3DVista.
+// A-Frame 'smooth-drag-look' component: smooth drag-to-look (mouse & touch),
+// 3DVista-style.
 //
-// A-Frame bawaan (look-controls) menerapkan delta pointer mentah 1:1 ke rotasi
-// kamera per event — terasa kaku/patah, dan formula touch bawaannya PUNYA ARAH
-// BERBEDA dari mouse (serta cuma menggerakkan yaw, pitch diabaikan). Komponen
-// ini menggantikan drag mouse DAN touch bawaan (mode VR headset TETAP dipegang
-// look-controls sendiri, tidak disentuh):
-//   1) Selama drag: kamera "mengejar" target rotasi dengan smoothing per-frame
-//      (bukan lompat ke posisi pointer persis) → gerakan terasa mulus.
-//   2) Saat dilepas: kecepatan gerak terakhir dipakai sebagai inertia — kamera
-//      terus "meluncur" lalu melambat & berhenti (bukan berhenti mendadak).
-//   3) Arah konsisten: geser kanan→kiri membuat konten bergeser ke kanan (dan
-//      sebaliknya), sama di mouse maupun touch.
+// Built-in A-Frame (look-controls) applies the raw pointer delta 1:1 to the
+// camera rotation per event — it feels stiff/choppy, and its touch formula has a
+// DIFFERENT DIRECTION from the mouse (and only moves yaw, ignoring pitch). This
+// component replaces the built-in mouse AND touch drag (VR headset mode is STILL
+// handled by look-controls itself, untouched):
+//   1) During drag: the camera "chases" the target rotation with per-frame
+//      smoothing (instead of jumping exactly to the pointer) → motion feels smooth.
+//   2) On release: the last movement speed is used as inertia — the camera keeps
+//      "gliding" then slows down & stops (not an abrupt halt).
+//   3) Consistent direction: dragging right→left moves the content to the right
+//      (and vice versa), the same on mouse and touch.
 export function registerSmoothDragLook() {
   const AFRAME =
     typeof window !== 'undefined' ? (window as unknown as { AFRAME?: any }).AFRAME : undefined;
   if (!AFRAME || AFRAME.components['smooth-drag-look']) return;
-
-  // Penanda versi utk diagnosa kode basi: komponen A-Frame TIDAK ke-register ulang
-  // lewat Fast Refresh — kalau log ini tak muncul di console, lakukan full reload.
-  console.info('[smooth-drag-look] v3 aktif — tanpa dot, scroll zoom, hotspot blend, zoom berangkat');
 
   const PI_2 = Math.PI / 2;
   const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
 
   AFRAME.registerComponent('smooth-drag-look', {
     schema: {
-      sensitivity: { default: 0.002 }, // rad per px — samakan dgn default look-controls
-      followMs: { default: 18 }, // time-constant (ms) kamera "mengejar" target saat drag — kecil = snappy
-      friction: { default: 0.8 }, // retensi kecepatan per ~16.67ms saat inertia — kecil = glide pendek
-      minVelocity: { default: 0.00006 }, // rad/ms — di bawah ini inertia dianggap selesai (potong ekor glide)
-      velocitySmoothing: { default: 0.4 }, // EMA utk estimasi kecepatan (seed inertia)
-      clickMaxPx: { default: 8 }, // gerak <= px ini antara tekan-lepas dihitung KLIK, bukan drag
-      hoverThrottleMs: { default: 80 }, // jeda minimal antar raycast hover
+      sensitivity: { default: 0.002 }, // rad per px — matches the look-controls default
+      followMs: { default: 18 }, // time-constant (ms) the camera "chases" the target while dragging — smaller = snappier
+      friction: { default: 0.8 }, // velocity retention per ~16.67ms during inertia — smaller = shorter glide
+      minVelocity: { default: 0.00006 }, // rad/ms — below this inertia is considered done (trims the glide tail)
+      velocitySmoothing: { default: 0.4 }, // EMA for the velocity estimate (seeds inertia)
+      clickMaxPx: { default: 8 }, // movement <= this many px between press-release counts as a CLICK, not a drag
+      hoverThrottleMs: { default: 80 }, // minimum gap between hover raycasts
     },
 
     init(this: any) {
@@ -58,9 +54,9 @@ export function registerSmoothDragLook() {
       const sceneEl = this.el.sceneEl;
       const getLook = () => this.el.components['look-controls'];
 
-      // Raycast NDC (-1..1) ke hotspot: kembalikan ROOT entity ber-class .clickable.
-      // (Klik & hover ditangani manual di sini — cursor rayOrigin:mouse bawaan
-      // A-Frame tidak kompatibel dengan pointer capture yang dipakai drag.)
+      // Raycast NDC (-1..1) to a hotspot: return the ROOT entity with class .clickable.
+      // (Click & hover are handled manually here — A-Frame's built-in rayOrigin:mouse
+      // cursor is incompatible with the pointer capture used for dragging.)
       this.raycastClickable = (nx: number, ny: number) => {
         const cam3 = sceneEl.camera;
         if (!cam3) return null;
@@ -69,8 +65,8 @@ export function registerSmoothDragLook() {
         const roots = Array.from(sceneEl.querySelectorAll('.clickable')) as any[];
         if (roots.length === 0) return null;
         const objects = roots.map((r) => r.object3D).filter(Boolean);
-        // matrixWorld bisa basi sesaat setelah mutasi (renderer baru update di
-        // frame berikutnya) — segarkan dulu supaya hasil raycast akurat.
+        // matrixWorld can be stale right after a mutation (the renderer only updates
+        // it next frame) — refresh it first so the raycast result is accurate.
         objects.forEach((o) => o.updateMatrixWorld(true));
         const hits = this.raycaster.intersectObjects(objects, true);
         const hitEl = hits[0]?.object?.el as HTMLElement | undefined;
@@ -98,7 +94,7 @@ export function registerSmoothDragLook() {
       };
 
       this.onPointerDown = (e: PointerEvent) => {
-        if (e.pointerType === 'pen') return; // stylus: biarkan default browser
+        if (e.pointerType === 'pen') return; // stylus: leave the browser default
         if (e.button !== 0) return;
         if (sceneEl.is('vr-mode') || sceneEl.is('ar-mode')) return;
         const look = getLook();
@@ -124,7 +120,7 @@ export function registerSmoothDragLook() {
       };
 
       this.onPointerMove = (e: PointerEvent) => {
-        // Hover hotspot (hanya saat TIDAK drag, di luar VR, throttled)
+        // Hotspot hover (only when NOT dragging, outside VR, throttled)
         if (!this.dragging && e.pointerType === 'mouse' && !sceneEl.is('vr-mode')) {
           const now = performance.now();
           if (now - this.lastHoverTime > this.data.hoverThrottleMs) {
@@ -147,8 +143,8 @@ export function registerSmoothDragLook() {
         this.targetYaw += dYaw;
         this.targetPitch = clamp(this.targetPitch + dPitch, -PI_2, PI_2);
 
-        // Estimasi kecepatan (rad/ms) di-EMA supaya inertia mengikuti tren gerak
-        // terakhir, bukan cuma sample mousemove paling akhir yang bisa jitter.
+        // The velocity estimate (rad/ms) is EMA-smoothed so inertia follows the
+        // recent movement trend, not just the very last mousemove sample which can jitter.
         const s = this.data.velocitySmoothing;
         this.velYaw = this.velYaw * (1 - s) + (dYaw / dt) * s;
         this.velPitch = this.velPitch * (1 - s) + (dPitch / dt) * s;
@@ -165,7 +161,7 @@ export function registerSmoothDragLook() {
         }
         if (this.canvas) this.canvas.style.cursor = 'grab';
 
-        // Tekan-lepas hampir tanpa geser = KLIK hotspot di posisi pointer.
+        // Press-release with almost no movement = CLICK the hotspot at the pointer.
         const moved = Math.hypot(e.clientX - this.downX, e.clientY - this.downY);
         if (wasDragging && moved <= this.data.clickMaxPx && !sceneEl.is('vr-mode')) {
           const ndc = this.pxToNdc(e.clientX, e.clientY);
@@ -192,8 +188,8 @@ export function registerSmoothDragLook() {
         this.canvas = sceneEl.canvas;
         if (!this.canvas) return;
         this.canvas.style.cursor = 'grab';
-        // Cegah browser membajak gesture touch (scroll/pull-refresh) di canvas —
-        // tanpa ini drag di layar sentuh bisa di-cancel (pointercancel) di tengah jalan.
+        // Prevent the browser from hijacking touch gestures (scroll/pull-refresh) on
+        // the canvas — without this, a touchscreen drag can be canceled (pointercancel) midway.
         this.canvas.style.touchAction = 'none';
         this.canvas.addEventListener('pointerdown', this.onPointerDown);
         window.addEventListener('pointermove', this.onPointerMove);
@@ -224,8 +220,8 @@ export function registerSmoothDragLook() {
       if (!look?.yawObject || !look?.pitchObject) return;
 
       if (this.dragging) {
-        // Kejar target dengan smoothing eksponensial frame-rate-independent —
-        // ini yang menghaluskan delta mousemove yang datang tidak rata.
+        // Chase the target with frame-rate-independent exponential smoothing —
+        // this is what smooths out unevenly-arriving mousemove deltas.
         const alpha = 1 - Math.exp(-dt / this.data.followMs);
         look.yawObject.rotation.y += (this.targetYaw - look.yawObject.rotation.y) * alpha;
         look.pitchObject.rotation.x += (this.targetPitch - look.pitchObject.rotation.x) * alpha;
@@ -256,9 +252,9 @@ export function registerSmoothDragLook() {
         return;
       }
 
-      // Idle (tak drag, tak inertia): sinkronkan target ke rotasi aktual — supaya
-      // kalau ada komponen lain (idle-rotate) yang menggerakkan kamera, drag
-      // berikutnya mulai mulus dari posisi saat itu, tanpa "lompat".
+      // Idle (no drag, no inertia): sync the target to the actual rotation — so if
+      // another component (idle-rotate) moves the camera, the next drag starts
+      // smoothly from the current position, without a "jump".
       this.targetYaw = look.yawObject.rotation.y;
       this.targetPitch = look.pitchObject.rotation.x;
     },

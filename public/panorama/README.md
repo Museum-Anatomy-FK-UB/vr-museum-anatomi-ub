@@ -1,32 +1,35 @@
-# public/panorama — Foto 360° untuk testing lokal
+# public/panorama — 360° photos for local testing
 
-Taruh foto 360° di sini untuk **testing lokal** (sementara, sebelum aset asli
-diambil dari storage server via API — lihat `docs/API.md`).
+Put 360° photos here for **local testing** (temporary, before the real assets
+are served from the server storage via the API — see `docs/API.md`).
 
-File di folder ini bisa diakses dari URL root, contoh:
+Files in this folder are reachable from the root URL, e.g.:
 
 ```
 public/panorama/lobby.jpg   →   http://localhost:3000/panorama/lobby.jpg
 ```
 
-## Syarat gambar
+## Image requirements
 
-- **Format equirectangular** (proyeksi bola), **rasio 2:1** (mis. 4096×2048,
-  8192×4096). Kalau bukan 2:1, panorama akan terlihat melar/miring.
-- Format file: `.jpg` (disarankan) atau `.png`.
-- Resolusi aman lintas perangkat: lebar **≤ 8192px** (banyak HP/GPU membatasi
-  ukuran tekstur di 4096–8192). Kalau ragu, pakai 4096×2048.
+- **Equirectangular format** (spherical projection), **2:1 ratio** (e.g. 4096×2048,
+  8192×4096). If it's not 2:1, the panorama will look stretched/skewed.
+- File format: `.jpg` (recommended) or `.png`.
+- Cross-device-safe resolution: width **≤ 8192px** (many phones/GPUs cap texture
+  size at 4096–8192). When in doubt, use 4096×2048.
 
-## Cara pakai (dev, mock)
+## How to use (dev, mock)
 
-1. Taruh file di folder ini, mis. `lobby.jpg`, `osteologi.jpg`.
-2. Buka `lib/mock/scenes.ts`, ganti `panorama_url` scene terkait ke path lokal:
+1. Put a file in this folder, e.g. `lobby.jpg`, `osteologi.jpg`.
+2. Open `lib/mock/scenes.ts` and change the relevant scene's `panorama_url` to
+   the local path:
 
    ```ts
-   panorama_url: '/panorama/lobby.jpg',   // bukan URL CDN/backend
+   panorama_url: '/panorama/lobby.jpg',   // not a CDN/backend URL
    ```
 
-3. `npm run dev` → buka `/vr` → pilih ruang.
+3. `npm run dev` → open `/vr` → pick a room.
 
-> Catatan: file gambar **tidak di-commit** ke Git (di-ignore). Yang di-track
-> hanya folder + README ini. Aset produksi disajikan dari storage server, bukan repo.
+> Note: image files are **not committed** to Git (ignored). Only this folder +
+> README are tracked. Production assets are served from the server storage, not the repo.
+```
+

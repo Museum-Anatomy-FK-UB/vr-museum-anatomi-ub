@@ -11,7 +11,7 @@ body {
   margin: 0;
 }
 
-/* Sembunyikan scrollbar horizontal saat canvas A-Frame aktif */
+/* Hide the horizontal scrollbar while the A-Frame canvas is active */
 a-scene {
   display: block;
 }

@@ -3,11 +3,11 @@
 import { useEffect, useState } from 'react';
 import type { CollectionPhoto } from '@/lib/types/collection';
 
-// Galeri foto koleksi: foto utama + caption + strip thumbnail (kalau >1 foto).
+// Collection photo gallery: main photo + caption + thumbnail strip (if >1 photo).
 export default function MediaGallery({ photos, alt }: { photos: CollectionPhoto[]; alt: string }) {
   const [index, setIndex] = useState(0);
 
-  // Reset ke foto pertama saat koleksi berganti.
+  // Reset to the first photo when the collection changes.
   useEffect(() => {
     setIndex(0);
   }, [photos]);

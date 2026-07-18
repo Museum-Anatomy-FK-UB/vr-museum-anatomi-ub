@@ -1,13 +1,13 @@
 import type { Scene, SceneSummary } from '@/lib/types/tour';
 
-// Foto 360° LOKAL untuk testing (public/panorama/...). Diakses dari root URL.
-// Nanti diganti URL storage server via API (lihat docs/API.md).
+// LOCAL 360° photos for testing (public/panorama/...). Served from the root URL.
+// Will be replaced by server storage URLs via the API (see docs/API.md).
 //
-// Pakai varian "-web" (4096x2048, di-downscale dari original 5376x2688) untuk
-// tekstur panorama di dalam scene — jauh lebih ringan di-decode/render sehingga
-// drag terasa mulus, tanpa kehilangan ketajaman yang terasa di VR. Varian
-// "-thumb" (640x320) khusus untuk kartu landing & galeri "All Location" —
-// jangan pernah load foto 360 full-res cuma untuk thumbnail kecil.
+// Use the "-web" variant (4096x2048, downscaled from the original 5376x2688) for
+// the in-scene panorama texture — much lighter to decode/render so dragging feels
+// smooth, without losing sharpness in VR. The "-thumb" variant (640x320) is only
+// for the landing cards & the "All Location" gallery — never load a full-res 360°
+// photo just for a small thumbnail.
 const LOBBY = '/panorama/lobby/loby-ftp-360-web.jpg';
 const LOBBY_THUMB = '/panorama/lobby/loby-ftp-360-thumb.jpg';
 const POS1 = '/panorama/scenes/pos1-360-web.jpg';
@@ -76,7 +76,7 @@ export const mockScenes: Record<string, Scene> = {
   },
 };
 
-// Posisi ruang pada denah (persen 0–100). Placeholder — nanti dari API/data FK.
+// Room positions on the floor plan (percent 0–100). Placeholder — later from API/FK data.
 const MAP_COORDS: Record<string, { map_x: number; map_y: number }> = {
   'ruang-lobby': { map_x: 50, map_y: 82 },
   'pos-1': { map_x: 24, map_y: 48 },

@@ -8,7 +8,7 @@ import type { Hotspot, HotspotArrow } from '@/lib/types/tour';
 // near/far clipping gives the depth buffer poor precision, so any two
 // near-coplanar transparent meshes (coin, rings, glow) can flicker or
 // half-render depending on camera angle — this is what caused the
-// "half cut" / "kotak" artifacts. Disabling depth test/write on these
+// "half cut" / "black box" artifacts. Disabling depth test/write on these
 // layers and forcing an explicit renderOrder makes the stacking
 // deterministic regardless of GPU precision.
 function registerLayerOrderComponent() {
@@ -55,18 +55,17 @@ function cachedTexture(
   return url;
 }
 
-// Rotasi (derajat) untuk mengarahkan panah ke arah tertentu — sekarang
-// dipakai untuk memutar gambar SAAT DIBAKAR ke texture, bukan lagi lewat
-// atribut rotation di JSX.
+// Rotation (degrees) to aim the arrow in a given direction — now used to rotate
+// the image WHEN IT'S BAKED into the texture, no longer via a rotation attribute in JSX.
 const ARROW_DEG: Record<HotspotArrow, number> = { up: 0, right: -90, down: 180, left: 90 };
 
 /**
- * Seluruh muka hotspot — glow ambient, koin gradasi, highlight, rim, dan
- * ikon — dibakar jadi SATU texture per varian (info, atau arrow per arah).
- * Sebelumnya tiap bagian ini adalah mesh terpisah yang saling tumpang
- * tindih nyaris sebidang; itu penyebab z-fighting yang bikin separuh
- * hotspot terlihat terpotong. Dengan satu texture di satu plane, tidak ada
- * lagi mesh lain (selain ring pulse) yang bisa "berebut" depth buffer.
+ * The entire hotspot face — ambient glow, gradient coin, highlight, rim, and
+ * icon — is baked into ONE texture per variant (info, or arrow per direction).
+ * Previously each of these was a separate mesh overlapping nearly coplanar; that
+ * caused the z-fighting that made half the hotspot look cut off. With a single
+ * texture on a single plane, no other mesh (besides the pulse ring) can "fight"
+ * over the depth buffer.
  */
 function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
   const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : 'face-info';
@@ -75,7 +74,7 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
     const cy = size / 2;
     const coinR = size * 0.32;
 
-    // 1. Glow ambient lembut (radial putih -> transparan)
+    // 1. Soft ambient glow (radial white -> transparent)
     const glow = ctx.createRadialGradient(cx, cy, coinR * 0.5, cx, cy, size * 0.5);
     glow.addColorStop(0, 'rgba(255,255,255,0.5)');
     glow.addColorStop(0.55, 'rgba(255,255,255,0.14)');
@@ -83,7 +82,7 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
     ctx.fillStyle = glow;
     ctx.fillRect(0, 0, size, size);
 
-    // 2. Koin gradasi radial (abu tengah -> nyaris hitam tepi)
+    // 2. Radial-gradient coin (grey center -> near-black edge)
     const coin = ctx.createRadialGradient(cx, cy - size * 0.02, 0, cx, cy, coinR * 1.05);
     coin.addColorStop(0, '#3a3a3a');
     coin.addColorStop(0.6, '#1a1a1a');
@@ -93,28 +92,28 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
     ctx.arc(cx, cy, coinR, 0, Math.PI * 2);
     ctx.fill();
 
-    // 3. Highlight tipis di dalam
+    // 3. Thin inner highlight
     ctx.strokeStyle = 'rgba(255,255,255,0.18)';
     ctx.lineWidth = size * 0.012;
     ctx.beginPath();
     ctx.arc(cx, cy, coinR * 0.88, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 4. Rim putih mengkilap
+    // 4. Glossy white rim
     ctx.strokeStyle = 'rgba(255,255,255,0.92)';
     ctx.lineWidth = size * 0.045;
     ctx.beginPath();
     ctx.arc(cx, cy, coinR * 1.08, 0, Math.PI * 2);
     ctx.stroke();
 
-    // 5. Ikon — digambar tajam & presisi (bukan primitif geometry lagi)
+    // 5. Icon — drawn crisp & precise (no longer geometry primitives)
     ctx.save();
     ctx.translate(cx, cy);
     ctx.fillStyle = '#f4f4f2';
 
     if (kind === 'arrow') {
       ctx.rotate((arrowDeg * Math.PI) / 180);
-      const s = coinR * 0.055; // diperkecil (sebelumnya 0.085 — kegedean vs ikon info)
+      const s = coinR * 0.055; // shrunk (was 0.085 — too big vs the info icon)
       ctx.beginPath();
       ctx.moveTo(0, -9 * s);
       ctx.lineTo(9 * s, 7 * s);
@@ -146,7 +145,7 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
   });
 }
 
-/** Konversi yaw/pitch (derajat) ke posisi 3D pada bola dengan radius tertentu. */
+/** Convert yaw/pitch (degrees) to a 3D position on a sphere of the given radius. */
 function toPosition(yaw: number, pitch: number, radius = 6): string {
   const y = (yaw * Math.PI) / 180;
   const p = (pitch * Math.PI) / 180;
@@ -159,7 +158,7 @@ function toPosition(yaw: number, pitch: number, radius = 6): string {
 function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: () => void }) {
   const ref = useRef<HTMLElement>(null);
 
-  // A-Frame cursor memancarkan event 'click' (gaze/mouse) pada entity target.
+  // The A-Frame cursor emits a 'click' event (gaze/mouse) on the target entity.
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -173,13 +172,13 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
     ? getHotspotFaceTexture('arrow', ARROW_DEG[hotspot.arrow ?? 'up'])
     : getHotspotFaceTexture('info');
 
-  // Hotspot navigasi "tidur" rebah spt marker lantai (bukan melayang tegak
-  // menghadap kamera) — rotasi X di sumbu lokal, tetap valid utk yaw berapa
-  // pun krn rotasi Y induk (billboard) tidak mengubah arah sumbu X lokal
-  // anak (masih horizontal). STATIS, TANPA animasi (tidak goyang/flip) —
-  // -78° (bukan -90 penuh) supaya sedikit miring, tidak rata/lurus total,
-  // dan mukanya tetap agak terlihat dari kamera alih-alih rebah datar.
-  // Hotspot info TETAP tegak menghadap kamera + animasi mengangguk (tidak diubah).
+  // Navigation hotspots "lie down" like a floor marker (instead of floating
+  // upright facing the camera) — an X rotation on the local axis, still valid for
+  // any yaw because the parent's Y rotation (billboard) doesn't change the child's
+  // local X axis (still horizontal). STATIC, NO animation (no wobble/flip) — -78°
+  // (not a full -90) so it tilts slightly, not perfectly flat, and its face stays
+  // somewhat visible to the camera instead of lying completely flat.
+  // Info hotspots STAY upright facing the camera + the nod animation (unchanged).
   const NAV_TILT = -78;
   const flatRotation = isArrow ? `${NAV_TILT} 0 0` : '0 0 0';
 
@@ -192,17 +191,17 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
       animation__enter="property: scale; startEvents: mouseenter; to: 1.28 1.28 1.28; dur: 160; easing: easeOutQuad"
       animation__leave="property: scale; startEvents: mouseleave; to: 1 1 1; dur: 160; easing: easeOutQuad"
     >
-      {/* Grup transisi: tumbuh saat mount, menyusut saat event 'hs-exit'
-          (dipancarkan VRScene saat mulai pindah ruangan). */}
+      {/* Transition group: grows on mount, shrinks on the 'hs-exit' event
+          (emitted by VRScene when a room transition begins). */}
       <a-entity
         class="hs-anim"
         scale="0.001 0.001 0.001"
         animation__in="property: scale; from: 0.001 0.001 0.001; to: 1 1 1; dur: 400; easing: easeOutQuad"
         animation__out="property: scale; to: 0.001 0.001 0.001; dur: 220; easing: easeInQuad; startEvents: hs-exit"
       >
-        {/* Ring "radar ping" — satu-satunya bagian yang tetap mesh terpisah,
-            karena beranimasi terus-menerus (scale/opacity). hotspot-layer
-            menjaga posisinya tetap stabil "di belakang" muka koin. */}
+        {/* "Radar ping" ring — the only part that stays a separate mesh, because
+            it animates continuously (scale/opacity). hotspot-layer keeps it
+            stable "behind" the coin face. */}
         <a-ring
           hotspot-layer="order: 0"
           rotation={flatRotation}
@@ -213,10 +212,10 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
           animation__pulsefade="property: material.opacity; from: 0.7; to: 0; loop: true; dur: 2200; easing: easeOutSine"
         />
 
-        {/* Muka hotspot: glow + koin + rim + ikon dalam SATU texture, SATU
-            plane — tidak ada lagi mesh lain yang bisa saling z-fight.
-            Navigasi: rotasi STATIS miring (-78°, lihat NAV_TILT), tanpa
-            animasi — tidak goyang/flip. Info: tegak + animasi mengangguk. */}
+        {/* Hotspot face: glow + coin + rim + icon in ONE texture, ONE plane —
+            no other mesh can z-fight anymore.
+            Navigation: STATIC tilted rotation (-78°, see NAV_TILT), no animation
+            — no wobble/flip. Info: upright + nod animation. */}
         <a-image
           hotspot-layer="order: 1"
           src={faceTexture}

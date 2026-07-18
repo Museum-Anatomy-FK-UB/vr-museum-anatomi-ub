@@ -4,8 +4,8 @@ import { useCollection } from '@/lib/hooks/useCollection';
 import MediaGallery from '@/components/ui/MediaGallery';
 import AudioPlayer from '@/components/ui/AudioPlayer';
 
-// Panel info koleksi yang slide-up dari bawah saat hotspot 'info' diklik.
-// Data koleksi diambil dari API (via SWR) — tidak ada hardcode.
+// Collection info panel that slides up from the bottom when an 'info' hotspot is clicked.
+// Collection data is fetched from the API (via SWR) — nothing hardcoded.
 export default function HotspotInfo({
   collectionId,
   onClose,

@@ -3,9 +3,9 @@
 import dynamic from 'next/dynamic';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
-// A-Frame TIDAK kompatibel SSR → wajib dynamic import dengan ssr:false.
-// VRScene mengelola sendiri load scene + transisi antar ruangan (a-scene persisten),
-// jadi page ini cukup meneruskan sceneId dari URL sebagai titik masuk.
+// A-Frame is NOT SSR-compatible → it must be dynamically imported with ssr:false.
+// VRScene handles scene loading + room transitions itself (persistent a-scene),
+// so this page just passes the sceneId from the URL as the entry point.
 const VRScene = dynamic(() => import('@/components/vr/VRScene'), {
   ssr: false,
   loading: () => <LoadingScreen message="Memuat ruang…" />,

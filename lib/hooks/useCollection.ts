@@ -3,7 +3,7 @@
 import useSWR from 'swr';
 import { getCollection } from '@/lib/api';
 
-/** Detail satu item koleksi (dipanggil saat hotspot info diklik). */
+/** Detail of a single collection item (called when an info hotspot is clicked). */
 export function useCollection(collectionId?: string) {
   const { data, error, isLoading } = useSWR(
     collectionId ? ['collection', collectionId] : null,
