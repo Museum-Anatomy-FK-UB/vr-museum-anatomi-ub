@@ -26,15 +26,15 @@ function PauseIcon() {
   );
 }
 
-// Pemutar audio voice-over: play/pause + seek + waktu. Custom (bukan <audio controls>)
-// biar konsisten dengan styling panel.
+// Voice-over audio player: play/pause + seek + time. Custom (not <audio controls>)
+// to stay consistent with the panel's styling.
 export default function AudioPlayer({ src }: { src: string }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
 
-  // Reset saat sumber audio berganti (pindah koleksi).
+  // Reset when the audio source changes (switching collection).
   useEffect(() => {
     setPlaying(false);
     setCurrent(0);
@@ -67,7 +67,8 @@ export default function AudioPlayer({ src }: { src: string }) {
         preload="metadata"
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
         onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
-        onEnded={() => {
+        onEnded={(e) => {
+          e.currentTarget.currentTime = 0; // reset to the start, so playing again begins from 0
           setPlaying(false);
           setCurrent(0);
         }}

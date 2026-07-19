@@ -1,77 +1,74 @@
-# Panduan Struktur Folder — vr-museum-anatomi-ub
+# Folder Structure Guide — vr-museum-anatomi-ub
 
-Dokumen ini menjelaskan struktur folder project Web VR Tour 360° dan konvensi
-kode yang dipakai. Wajib dibaca sebelum mulai menambah file/komponen baru.
+This document explains the folder structure of the 360° Web VR Tour project and
+the code conventions used. Please read it before adding new files/components.
 
 ---
 
-## Gambaran Umum
+## Overview
 
 ```
 vr-museum-anatomi-ub/
 ├── app/                    # Next.js App Router
-│   ├── layout.tsx          # Root layout (metadata, font, global style)
-│   ├── page.tsx            # Homepage (redirect ke /vr)
+│   ├── layout.tsx          # Root layout (metadata, fonts, global styles)
+│   ├── page.tsx            # Homepage (redirects to /vr)
 │   └── vr/
-│       ├── page.tsx        # Landing page VR — daftar semua ruang
+│       ├── page.tsx        # VR landing page — list of all rooms
 │       └── [sceneId]/
-│           └── page.tsx    # Scene aktif — panorama + hotspot
+│           └── page.tsx    # Active scene — panorama + hotspots
 │
 ├── components/
-│   ├── vr/                 # Komponen spesifik VR (pakai A-Frame)
-│   │   ├── VRScene.tsx         # A-Frame scene utama
-│   │   ├── HotspotLayer.tsx    # Render hotspot dari data API
-│   │   ├── HotspotInfo.tsx     # Panel info koleksi (slide panel)
-│   │   ├── FloorplanMap.tsx    # Overlay peta/denah museum
-│   │   └── VRModeButton.tsx    # Toggle WebXR / Cardboard
-│   └── ui/                 # Komponen UI umum (tanpa A-Frame)
-│       ├── AudioPlayer.tsx     # Player voice over
-│       ├── MediaGallery.tsx    # Galeri foto koleksi
-│       ├── LoadingScreen.tsx   # Loading state saat scene load
-│       └── SceneCard.tsx       # Card thumbnail ruang di landing page
+│   ├── vr/                 # VR-specific components (use A-Frame)
+│   │   ├── VRScene.tsx         # Main A-Frame scene
+│   │   ├── HotspotLayer.tsx    # Renders hotspots from API data
+│   │   ├── HotspotInfo.tsx     # Collection info panel (slide panel)
+│   │   ├── FloorplanMap.tsx    # Museum map / floor plan overlay
+│   │   └── VRModeButton.tsx    # WebXR / Cardboard toggle
+│   └── ui/                 # Generic UI components (no A-Frame)
+│       ├── AudioPlayer.tsx     # Voice-over player
+│       ├── MediaGallery.tsx    # Collection photo gallery
+│       ├── LoadingScreen.tsx   # Loading state while a scene loads
+│       └── SceneCard.tsx       # Room thumbnail card on the landing page
 │
 ├── lib/
-│   ├── api.ts              # Semua fungsi fetch ke backend API
+│   ├── api.ts              # All fetch functions to the backend API
 │   ├── types/
-│   │   ├── tour.ts         # Type: Scene, Hotspot, NavHotspot, InfoHotspot
-│   │   └── collection.ts   # Type: Collection, Photo, Audio
+│   │   ├── tour.ts         # Types: Scene, Hotspot, NavHotspot, InfoHotspot
+│   │   └── collection.ts   # Types: Collection, Photo, Audio
 │   ├── hooks/
-│   │   ├── useScene.ts     # SWR hook — fetch data scene + hotspot
-│   │   └── useCollection.ts # SWR hook — fetch detail koleksi
-│   └── mock/               # Mock data untuk dev (sebelum API backend siap)
+│   │   ├── useScene.ts     # SWR hook — fetch scene + hotspot data
+│   │   └── useCollection.ts # SWR hook — fetch collection detail
+│   └── mock/               # Mock data for dev (before the backend API is ready)
 │       ├── scenes.ts
 │       └── collections.ts
 │
 ├── public/
-│   ├── placeholder/        # Foto 360° placeholder (dev sebelum aset FK ada)
-│   │   ├── lobby.jpg
-│   │   ├── osteologi.jpg
-│   │   └── ...
-│   └── icons/              # Icon UI (hotspot, navigasi, dll)
+│   ├── panorama/           # Local 360° photos for testing (see its README)
+│   └── icons/              # UI icons (hotspots, navigation, etc.)
 │
-├── docs/                   # Dokumentasi teknis
-│   ├── STRUCTURE.md        # File ini
-│   └── API.md              # Kontrak endpoint API
+├── docs/                   # Technical documentation
+│   ├── STRUCTURE.md        # This file
+│   └── API.md              # API endpoint contract
 │
-├── CLAUDE.md               # Konteks project untuk AI assistant
-├── README.md               # Gambaran project & cara setup
-├── .env.example            # Template environment variables
-├── next.config.js          # Konfigurasi Next.js
-├── tailwind.config.ts      # Konfigurasi Tailwind
-└── tsconfig.json           # Konfigurasi TypeScript
+├── CLAUDE.md               # Project context for the AI assistant
+├── README.md               # Project overview & setup guide
+├── .env.example            # Environment variable template
+├── next.config.js          # Next.js configuration
+├── tailwind.config.ts      # Tailwind configuration
+└── tsconfig.json           # TypeScript configuration
 ```
 
 ---
 
-## Aturan Penting
+## Important Rules
 
-### Komponen A-Frame
-Semua komponen yang menggunakan A-Frame (`<a-scene>`, `<a-sky>`, dll) WAJIB:
-1. Berada di folder `components/vr/`
-2. Di-import menggunakan `dynamic()` dengan `ssr: false`
-3. Tidak di-import langsung di Server Component
+### A-Frame Components
+Every component that uses A-Frame (`<a-scene>`, `<a-sky>`, etc.) MUST:
+1. Live in the `components/vr/` folder
+2. Be imported via `dynamic()` with `ssr: false`
+3. Never be imported directly in a Server Component
 
-Contoh import yang benar:
+Correct import example:
 ```tsx
 import dynamic from 'next/dynamic';
 
@@ -82,26 +79,26 @@ const VRScene = dynamic(() => import('@/components/vr/VRScene'), {
 ```
 
 ### Data & API
-- Semua fetch ke backend WAJIB melalui fungsi di `lib/api.ts`
-- Jangan fetch langsung dari komponen tanpa melalui hooks atau `api.ts`
-- Mock data untuk development ada di `lib/mock/` — dipakai sampai endpoint
-  backend siap, lalu di-switch ke API real lewat `api.ts`
+- Every backend fetch MUST go through a function in `lib/api.ts`
+- Do not fetch directly from a component without going through hooks or `api.ts`
+- Mock data for development lives in `lib/mock/` — used until the backend
+  endpoints are ready, then switched to the real API via `api.ts`
 
-### Aset Foto 360°
-- Placeholder untuk development: `public/placeholder/`
-- Aset produksi (foto asli dari FK): disimpan di file storage server UB,
-  diakses via URL dari API (`panorama_url` di response scene)
-- JANGAN commit foto 360° resolusi tinggi ke repository Git
-  (ukuran besar — gunakan storage server)
+### 360° Photo Assets
+- Development placeholders: `public/panorama/` (see `public/panorama/README.md`)
+- Production assets (real photos from FK): stored on the UB server's file
+  storage, accessed via a URL from the API (`panorama_url` in the scene response)
+- DO NOT commit high-resolution 360° photos to the Git repository
+  (large files — use the server storage instead)
 
 ---
 
-## Konvensi Penamaan
+## Naming Conventions
 
-| Tipe | Convention | Contoh |
+| Type | Convention | Example |
 |---|---|---|
-| Komponen React | PascalCase | `VRScene.tsx`, `HotspotInfo.tsx` |
-| Hooks | camelCase + prefix `use` | `useScene.ts` |
+| React component | PascalCase | `VRScene.tsx`, `HotspotInfo.tsx` |
+| Hooks | camelCase + `use` prefix | `useScene.ts` |
 | Utility / lib | camelCase | `api.ts`, `formatters.ts` |
 | Type / Interface | PascalCase | `Scene`, `Hotspot`, `Collection` |
 | Scene ID (URL) | kebab-case | `ruang-osteologi`, `ruang-lobby` |
@@ -109,11 +106,11 @@ const VRScene = dynamic(() => import('@/components/vr/VRScene'), {
 
 ---
 
-## Alur Penambahan Fitur Baru
+## Adding a New Feature
 
-1. Buat branch dari `develop`: `git checkout -b feature/nama-fitur`
-2. Tentukan komponen masuk `components/vr/` (pakai A-Frame) atau `components/ui/`
-3. Jika butuh data baru, tambahkan fungsi fetch di `lib/api.ts` + type di `lib/types/`
-4. Jika endpoint belum ada di backend, buat dulu mock di `lib/mock/`
-5. Update `docs/API.md` jika menambah kebutuhan endpoint baru
-6. Commit dengan convention (lihat README), buat PR ke `develop`
+1. Create a branch from `develop`: `git checkout -b feature/feature-name`
+2. Decide whether the component goes in `components/vr/` (uses A-Frame) or `components/ui/`
+3. If new data is needed, add a fetch function in `lib/api.ts` + a type in `lib/types/`
+4. If the endpoint doesn't exist on the backend yet, add a mock in `lib/mock/` first
+5. Update `docs/API.md` if you introduce a new endpoint requirement
+6. Commit using the convention (see README), open a PR into `develop`

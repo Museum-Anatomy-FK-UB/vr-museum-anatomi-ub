@@ -4,8 +4,8 @@ import { useEffect, useState } from 'react';
 
 type Coords = { yaw: number; pitch: number };
 
-// Tool developer: crosshair di tengah layar + baca yaw/pitch titik yang diarahkan
-// secara live, lalu salin. Untuk bantu menaruh hotspot di foto asli tanpa nebak angka.
+// Developer tool: a screen-center crosshair + a live yaw/pitch readout of the
+// aimed point, then copy. Helps place hotspots on real photos without guessing numbers.
 export default function HotspotPicker({
   sceneId,
   getCoords,
@@ -18,7 +18,7 @@ export default function HotspotPicker({
   const [coords, setCoords] = useState<Coords>({ yaw: 0, pitch: 0 });
   const [copied, setCopied] = useState(false);
 
-  // Loop baca arah kamera tiap frame (update saat user melihat sekeliling).
+  // Loop reading the camera direction each frame (updates as the user looks around).
   useEffect(() => {
     let raf = 0;
     const loop = () => {
@@ -43,7 +43,7 @@ export default function HotspotPicker({
 
   return (
     <>
-      {/* Crosshair di tengah layar */}
+      {/* Crosshair at the screen center */}
       <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
         <div className="relative h-8 w-8">
           <span className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/80" />
