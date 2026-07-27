@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Scene, SceneSummary } from '@/lib/types/tour';
-import { getScene, getScenes, USE_MOCK } from '@/lib/api';
+import { getScene, getScenes } from '@/lib/api';
 import HotspotLayer from './HotspotLayer';
 import HotspotInfo from './HotspotInfo';
 import VRModeButton from './VRModeButton';
@@ -20,8 +20,9 @@ import LoadingScreen from '@/components/ui/LoadingScreen';
 const DEFAULT_FOV = 80;
 const ZOOM_FOV = 45;
 
-// The "Pick coordinate" tool is testing-mode only (mock) — auto-hidden in production.
-const PICKER_ENABLED = USE_MOCK;
+// The "Pick coordinate" tool helps whoever is placing hotspots find yaw/pitch —
+// dev-only, auto-hidden in production builds.
+const PICKER_ENABLED = process.env.NODE_ENV !== 'production';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -209,7 +210,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       // the new ones mount and grow in during the rest of the blend)
       await wait(300);
       setActiveScene(next);
-      window.history.replaceState(null, '', `/vr/${targetId}`);
+      window.history.replaceState(null, '', `/vr/${next.id}`);
 
       await blend;
     } finally {
@@ -256,7 +257,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     );
   }
 
-  const mainSceneId = sceneList[0]?.id ?? 'ruang-lobby';
+  // First room by order_index — no hardcoded fallback; simply a no-op until sceneList loads.
+  const mainSceneId = sceneList[0]?.id;
 
   return (
     <div ref={containerRef} className="fixed inset-0 bg-black">
@@ -356,6 +358,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       {/* Footer control bar */}
       <SceneControlsBar
         onMainLocation={() => {
+          if (!mainSceneId) return;
           setGalleryOpen(false);
           navigateTo(mainSceneId);
         }}
