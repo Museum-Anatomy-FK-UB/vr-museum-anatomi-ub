@@ -4,7 +4,10 @@ Draft of the endpoints the Web VR needs. This document was written by the VR tea
 as a **proposal to the Backend team (Azkal / Akmal)** to be reviewed and
 implemented.
 
-> **Status:** Draft — not final, needs alignment with the Backend team.
+> **Status:** Implemented — the VR frontend now consumes this live (see
+> `NEXT_PUBLIC_API_BASE_URL`). One deviation from the original draft below:
+> the collection endpoint actually implemented is `GET /api/vr/collections/:id`
+> (not `/api/collections/:id` as first drafted) — updated below to match.
 
 ---
 
@@ -110,7 +113,7 @@ of the target room.
 
 ---
 
-## 3. `GET /api/collections/:id`
+## 3. `GET /api/vr/collections/:id`
 
 Returns the detail of a single collection item. Called when the user clicks an
 `info` hotspot. This data is the **same** as the one used by the Web Portal and
@@ -153,7 +156,7 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | string | yes | Stable slug, used in the URL (`/vr/:id`) |
+| `id` | string | yes | Stable slug, used in the URL (`/vr/:id`). The backend's actual primary key is a UUID with the slug in a separate `slug_name` field — the VR client remaps `id` to `slug_name` on receipt so URLs stay readable; either form works when querying the backend directly |
 | `title` | string | yes | Room name shown on cards & floor plan |
 | `thumbnail_url` | string (URL) | yes | Small image for landing cards, not the full 360° photo |
 | `order` | number | yes | Display order in the room list |
@@ -184,7 +187,7 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `target_scene_id` | string | required if `type: navigation` | Must match an existing `Scene.id` — see referential integrity note below |
 | `collection_id` | string | required if `type: info` | Must match an existing `Collection.id` |
 
-### Collection (`GET /api/collections/:id`)
+### Collection (`GET /api/vr/collections/:id`)
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -269,9 +272,8 @@ That editing UI is out of scope for this repo; the VR team just needs to know:
    `id` in the collection table used by the Web Portal and Multimedia. There must
    not be a separate collection table just for VR.
 
-4. **Parallel development** — Until these endpoints are ready, the VR team uses
-   local mock data in `lib/mock/`. Once the endpoints are live, we just switch
-   `NEXT_PUBLIC_API_BASE_URL` and the functions in `lib/api.ts`.
+4. **Parallel development** — Done. The VR frontend has switched to the live
+   API via `NEXT_PUBLIC_API_BASE_URL`; the local mock layer has been removed.
 
 5. **Error handling** — Please be consistent: use the correct HTTP status codes
    for error responses (404 for scene/collection not found, 500 for server

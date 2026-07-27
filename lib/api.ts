@@ -1,21 +1,10 @@
 // API client — the SINGLE place that fetches from the backend.
-// While the backend endpoints aren't ready, it automatically uses the mock (lib/mock).
-// Once the API is live: set NEXT_PUBLIC_API_BASE_URL & NEXT_PUBLIC_USE_MOCK=false,
-// no component needs to change at all.
+// See docs/API.md for the contract and NEXT_PUBLIC_API_BASE_URL in .env.local.
 
 import type { Scene, SceneSummary } from '@/lib/types/tour';
 import type { Collection } from '@/lib/types/collection';
-import { mockScenes, mockSceneList } from '@/lib/mock/scenes';
-import { mockCollections } from '@/lib/mock/collections';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
-/** true = use the local mock (lib/mock). Active if set explicitly or BASE_URL is empty. */
-export const USE_MOCK = process.env.NEXT_PUBLIC_USE_MOCK === 'true' || !BASE_URL;
-
-/** Simulate network latency so loading states get exercised while mocking. */
-function mock<T>(value: T, ms = 250): Promise<T> {
-  return new Promise((resolve) => setTimeout(() => resolve(value), ms));
-}
 
 /** Extract `data` from a `{ data: ... }` response per the docs/API.md contract. */
 async function request<T>(path: string): Promise<T> {
@@ -27,25 +16,27 @@ async function request<T>(path: string): Promise<T> {
   return json.data;
 }
 
+/**
+ * The backend's real primary key is a UUID; `slug_name` (e.g. "ruang-lobby")
+ * is a separate human-readable field. Swap `id` for the slug here so the rest
+ * of the app (URLs, floor plan, gallery) keeps working with pretty ids —
+ * the backend's show() endpoints accept either form anyway.
+ */
+function useSlugAsId<T extends { id: string; slug_name?: string }>(item: T): T {
+  return item.slug_name ? { ...item, id: item.slug_name } : item;
+}
+
 export async function getScenes(): Promise<SceneSummary[]> {
-  if (USE_MOCK) return mock(mockSceneList);
-  return request<SceneSummary[]>('/vr/scenes');
+  const scenes = await request<SceneSummary[]>('/vr/scenes');
+  return scenes.map(useSlugAsId);
 }
 
 export async function getScene(sceneId: string): Promise<Scene> {
-  if (USE_MOCK) {
-    const scene = mockScenes[sceneId];
-    if (!scene) throw new Error(`Scene "${sceneId}" not found`);
-    return mock(scene);
-  }
-  return request<Scene>(`/vr/scenes/${sceneId}`);
+  const scene = await request<Scene>(`/vr/scenes/${sceneId}`);
+  return useSlugAsId(scene);
 }
 
 export async function getCollection(id: string): Promise<Collection> {
-  if (USE_MOCK) {
-    const collection = mockCollections[id];
-    if (!collection) throw new Error(`Collection "${id}" not found`);
-    return mock(collection);
-  }
-  return request<Collection>(`/collections/${id}`);
+  const collection = await request<Collection>(`/vr/collections/${id}`);
+  return useSlugAsId(collection);
 }

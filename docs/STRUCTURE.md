@@ -35,12 +35,9 @@ vr-museum-anatomi-ub/
 │   ├── types/
 │   │   ├── tour.ts         # Types: Scene, Hotspot, NavHotspot, InfoHotspot
 │   │   └── collection.ts   # Types: Collection, Photo, Audio
-│   ├── hooks/
-│   │   ├── useScene.ts     # SWR hook — fetch scene + hotspot data
-│   │   └── useCollection.ts # SWR hook — fetch collection detail
-│   └── mock/               # Mock data for dev (before the backend API is ready)
-│       ├── scenes.ts
-│       └── collections.ts
+│   └── hooks/
+│       ├── useScene.ts     # SWR hook — fetch scene + hotspot data
+│       └── useCollection.ts # SWR hook — fetch collection detail
 │
 ├── public/
 │   ├── panorama/           # Local 360° photos for testing (see its README)
@@ -81,8 +78,8 @@ const VRScene = dynamic(() => import('@/components/vr/VRScene'), {
 ### Data & API
 - Every backend fetch MUST go through a function in `lib/api.ts`
 - Do not fetch directly from a component without going through hooks or `api.ts`
-- Mock data for development lives in `lib/mock/` — used until the backend
-  endpoints are ready, then switched to the real API via `api.ts`
+- All data comes live from the backend API (`NEXT_PUBLIC_API_BASE_URL`) — there
+  is no mock/dummy data path anymore
 
 ### 360° Photo Assets
 - Development placeholders: `public/panorama/` (see `public/panorama/README.md`)
@@ -111,6 +108,5 @@ const VRScene = dynamic(() => import('@/components/vr/VRScene'), {
 1. Create a branch from `develop`: `git checkout -b feature/feature-name`
 2. Decide whether the component goes in `components/vr/` (uses A-Frame) or `components/ui/`
 3. If new data is needed, add a fetch function in `lib/api.ts` + a type in `lib/types/`
-4. If the endpoint doesn't exist on the backend yet, add a mock in `lib/mock/` first
-5. Update `docs/API.md` if you introduce a new endpoint requirement
-6. Commit using the convention (see README), open a PR into `develop`
+4. Update `docs/API.md` if you introduce a new endpoint requirement
+5. Commit using the convention (see README), open a PR into `develop`

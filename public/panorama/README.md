@@ -17,19 +17,18 @@ public/panorama/lobby.jpg   →   http://localhost:3000/panorama/lobby.jpg
 - Cross-device-safe resolution: width **≤ 8192px** (many phones/GPUs cap texture
   size at 4096–8192). When in doubt, use 4096×2048.
 
-## How to use (dev, mock)
+## How to use
 
-1. Put a file in this folder, e.g. `lobby.jpg`, `osteologi.jpg`.
-2. Open `lib/mock/scenes.ts` and change the relevant scene's `panorama_url` to
-   the local path:
+Data (including `panorama_url`) now comes live from the backend API — there is
+no local mock layer anymore. This folder is only useful if you need to point a
+room's `panorama_url` at a local file for one-off testing (e.g. the backend
+team hasn't uploaded a photo yet): put the file here, then set that scene's
+`panorama_url` in the backend/CMS to the local path, e.g.:
 
-   ```ts
-   panorama_url: '/panorama/lobby.jpg',   // not a CDN/backend URL
-   ```
-
-3. `npm run dev` → open `/vr` → pick a room.
+```
+http://localhost:3000/panorama/lobby.jpg
+```
 
 > Note: image files are **not committed** to Git (ignored). Only this folder +
 > README are tracked. Production assets are served from the server storage, not the repo.
-```
 
