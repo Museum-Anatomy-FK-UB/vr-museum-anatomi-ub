@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Scene, SceneSummary } from '@/lib/types/tour';
 import { getScene, getScenes } from '@/lib/api';
-import HotspotLayer from './HotspotLayer';
+import HotspotLayer, { registerHotspotLayer } from './HotspotLayer';
 import HotspotInfo from './HotspotInfo';
 import VRModeButton from './VRModeButton';
 import SceneControlsBar from './SceneControlsBar';
@@ -15,10 +15,8 @@ import { registerIdleRotate } from './idleRotate';
 import { registerSmoothDragLook } from './smoothDragLook';
 import { registerSkyCrossfade } from './skyCrossfade';
 import { registerScrollZoom } from './scrollZoom';
+import { registerLittlePlanetIntro } from './littlePlanetIntro';
 import LoadingScreen from '@/components/ui/LoadingScreen';
-
-const DEFAULT_FOV = 80;
-const ZOOM_FOV = 45;
 
 // The "Pick coordinate" tool helps whoever is placing hotspots find yaw/pitch —
 // dev-only, auto-hidden in production builds.
@@ -26,26 +24,64 @@ const PICKER_ENABLED = process.env.NODE_ENV !== 'production';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function setFov(cam: HTMLElement, v: number) {
-  (cam as unknown as { setAttribute(c: string, p: string, v: unknown): void }).setAttribute('camera', 'fov', v);
+/**
+ * A-Frame initializes an entity's components asynchronously, so right after React
+ * commits, `el.components[name]` can still be empty — giving up at that instant
+ * would silently skip whatever depends on it. Poll briefly instead.
+ */
+async function waitForComponent(el: HTMLElement | null, name: string, timeoutMs = 3000) {
+  const start = performance.now();
+  while (performance.now() - start < timeoutMs) {
+    const component = (el as unknown as { components?: Record<string, any> } | null)?.components?.[name];
+    if (component) return component;
+    await wait(50);
+  }
+  return null;
 }
 
-/** Camera FOV (zoom) animation with easing — the core of the "entering a room" effect.
- *  rAF for smoothness; setTimeout guarantees the final value even if rAF is paused
- *  (e.g. background tab), so the camera never gets "stuck" zoomed. */
-function tweenFov(cam: HTMLElement, from: number, to: number, dur: number) {
-  const el = cam as unknown as { __fovRaf?: number; __fovEnd?: ReturnType<typeof setTimeout> };
-  if (el.__fovRaf) cancelAnimationFrame(el.__fovRaf);
-  if (el.__fovEnd) clearTimeout(el.__fovEnd);
+/**
+ * Re-center the look direction to (yaw 0, pitch 0) — world-yaw 0 is, by
+ * definition, wherever the sky's rotation (initial_yaw) points its "front", so
+ * this always lands on the intended establishing view regardless of which
+ * direction the visitor was looking when they triggered the navigation.
+ * Skipped in VR mode — forcing the camera against a headset's own head
+ * tracking is disorienting, not "on point".
+ */
+function recenterLook(cam: HTMLElement, dur: number) {
+  const sceneEl = document.querySelector('a-scene') as unknown as { is?: (s: string) => boolean } | null;
+  if (sceneEl?.is?.('vr-mode') || sceneEl?.is?.('ar-mode')) return;
+
+  const el = cam as unknown as {
+    components?: Record<string, any>;
+    __lookRaf?: number;
+    __lookEnd?: ReturnType<typeof setTimeout>;
+  };
+  const look = el.components?.['look-controls'];
+  if (!look?.yawObject || !look?.pitchObject) return;
+  el.components?.['smooth-drag-look']?.resetDrag?.();
+
+  if (el.__lookRaf) cancelAnimationFrame(el.__lookRaf);
+  if (el.__lookEnd) clearTimeout(el.__lookEnd);
+  const fromYaw = look.yawObject.rotation.y;
+  const fromPitch = look.pitchObject.rotation.x;
+  // Shortest angular path to 0 (wrap to [-PI, PI]) — otherwise a yaw that has
+  // accumulated past a full turn would spin the long way around.
+  const deltaYaw = Math.atan2(Math.sin(-fromYaw), Math.cos(-fromYaw));
   const start = performance.now();
   const step = (now: number) => {
     const t = Math.min(1, (now - start) / dur);
     const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-    setFov(cam, from + (to - from) * eased);
-    if (t < 1) el.__fovRaf = requestAnimationFrame(step);
+    look.yawObject.rotation.y = fromYaw + deltaYaw * eased;
+    look.pitchObject.rotation.x = fromPitch - fromPitch * eased;
+    if (t < 1) el.__lookRaf = requestAnimationFrame(step);
   };
-  el.__fovRaf = requestAnimationFrame(step);
-  el.__fovEnd = setTimeout(() => setFov(cam, to), dur + 60);
+  el.__lookRaf = requestAnimationFrame(step);
+  // Guarantee the final orientation even if rAF is paused (backgrounded tab),
+  // so the view can never be left stuck mid-turn.
+  el.__lookEnd = setTimeout(() => {
+    look.yawObject.rotation.y = 0;
+    look.pitchObject.rotation.x = 0;
+  }, dur + 60);
 }
 
 // PERSISTENT A-Frame scene: the a-scene is not torn down when switching rooms —
@@ -63,17 +99,21 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [floorplanOpen, setFloorplanOpen] = useState(false);
   const [hotspotsVisible, setHotspotsVisible] = useState(true);
   const [pickerActive, setPickerActive] = useState(false);
+  const [introPlaying, setIntroPlaying] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const skyRef = useRef<HTMLElement>(null);
   const cameraRef = useRef<HTMLElement>(null);
+  const planetRef = useRef<HTMLElement>(null);
   const cursorRef = useRef<HTMLElement>(null);
   const transitioningRef = useRef(false);
   const didIntroRef = useRef(false);
   const currentIdRef = useRef<string | null>(null);
+  const activeSceneRef = useRef<Scene | null>(null);
 
   useEffect(() => {
     currentIdRef.current = activeScene?.id ?? null;
+    activeSceneRef.current = activeScene;
   }, [activeScene]);
 
   // 1) Load A-Frame on the client (registers the custom elements on window) +
@@ -85,6 +125,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerSmoothDragLook();
       registerSkyCrossfade();
       registerScrollZoom();
+      registerHotspotLayer();
+      registerLittlePlanetIntro();
       if (mounted) setReady(true);
     });
     return () => {
@@ -145,8 +187,10 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     let mounted = true;
     getScene(initialSceneId)
       .then(async (scene) => {
-        const sky = skyRef.current as unknown as { components?: Record<string, any> } | null;
-        await sky?.components?.['sky-crossfade']?.setInitial(scene.panorama_url, scene.initial_yaw ?? 0);
+        // Wait for the component rather than reading it optionally: if it isn't
+        // ready yet the panorama would silently never load at all.
+        const sky = await waitForComponent(skyRef.current, 'sky-crossfade');
+        await sky?.setInitial(scene.panorama_url, scene.initial_yaw ?? 0, scene.horizon_roll ?? 0);
         if (mounted) setActiveScene(scene);
       })
       .catch(() => {
@@ -162,19 +206,60 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     };
   }, [ready, initialSceneId]);
 
-  // 3) Intro reveal: once the first scene appears, lift the black curtain while zooming out.
+  // 3) Intro reveal: "Little Planet" opening — the panorama starts curled into a
+  //    small planet seen from above, then unrolls into the normal view. Only on
+  //    the first room of a visit; moving between rooms uses the crossfade instead.
   useEffect(() => {
     if (!activeScene || didIntroRef.current) return;
     const cam = cameraRef.current;
+    const skyEl = skyRef.current as unknown as { components?: Record<string, any> } | null;
     if (!cam) return;
     didIntroRef.current = true;
-    setFov(cam, ZOOM_FOV);
-    const t = setTimeout(() => {
-      setCoverDuration(900);
+
+    let cancelled = false;
+
+    (async () => {
+      const planet = await waitForComponent(planetRef.current, 'little-planet-intro');
+      const sky = skyEl?.components?.['sky-crossfade'];
+      const activeMesh = sky ? (sky.activeIsA ? sky.meshA : sky.meshB) : null;
+      const texture = activeMesh?.material?.map;
+      if (cancelled) return;
+
+      if (!planet || !texture) {
+        // Nothing to project (texture failed to load) — just lift the curtain.
+        setCoverDuration(900);
+        setCovered(false);
+        return;
+      }
+
+      // The intro quad covers the whole viewport, so the black curtain can go
+      // immediately — the planet itself is the reveal.
+      setCoverDuration(300);
       setCovered(false);
-      tweenFov(cam, ZOOM_FOV, DEFAULT_FOV, 900);
-    }, 30);
-    return () => clearTimeout(t);
+      setIntroPlaying(true);
+
+      await planet.runIntro({
+        texture,
+        skyYaw: activeMesh.rotation.y,
+        skyRoll: activeMesh.rotation.z,
+      });
+      if (cancelled) return;
+
+      // The intro ends looking straight ahead and level; snap the real camera to
+      // match so the handoff is invisible even if the visitor dragged mid-intro.
+      const look = (cam as unknown as { components?: Record<string, any> }).components?.[
+        'look-controls'
+      ];
+      if (look?.yawObject && look?.pitchObject) {
+        look.yawObject.rotation.y = 0;
+        look.pitchObject.rotation.x = 0;
+      }
+      setIntroPlaying(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeScene]);
 
   // Room transition: BLEND between the two panoramas (dissolve, no black).
@@ -183,12 +268,24 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   // new panorama is completely still from the start (no zoom, no "snap" at the end).
   // Hotspots follow the transition: the old ones shrink out first (hs-exit event),
   // the new ones grow in mid-blend — no abrupt appear/disappear.
-  const navigateTo = useCallback(async (targetId: string) => {
+  const navigateTo = useCallback(async (targetId: string, transitionUrl?: string) => {
     if (transitioningRef.current || targetId === currentIdRef.current) return;
     transitioningRef.current = true;
     const cam = cameraRef.current;
     const sky = skyRef.current as unknown as { components?: Record<string, any> } | null;
     try {
+      // Optional one-off frame (e.g. a door opening) shown in place, at the
+      // current scene's own rotation, before the real crossfade to the target room.
+      if (transitionUrl) {
+        await sky?.components?.['sky-crossfade']?.crossfadeTo(
+          transitionUrl,
+          activeSceneRef.current?.initial_yaw ?? 0,
+          500,
+          activeSceneRef.current?.horizon_roll ?? 0,
+        );
+        await wait(350);
+      }
+
       const next = await getScene(targetId);
 
       setActiveCollectionId(null);
@@ -204,7 +301,18 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       }
 
       // Blend old panorama -> new (700ms) + "push forward" on the old panorama
-      const blend = sky?.components?.['sky-crossfade']?.crossfadeTo(next.panorama_url, next.initial_yaw ?? 0, 700);
+      const blend = sky?.components?.['sky-crossfade']?.crossfadeTo(
+        next.panorama_url,
+        next.initial_yaw ?? 0,
+        700,
+        next.horizon_roll ?? 0,
+      );
+
+      // Re-orient the view to the new room's intended facing at the same pace
+      // as the blend, so by the time the room is fully visible you're already
+      // looking at the right thing — not wherever you happened to be facing
+      // before clicking the hotspot.
+      if (cam) recenterLook(cam, 700);
 
       // Swap hotspots & URL mid-blend (old hotspots have fully shrunk away;
       // the new ones mount and grow in during the rest of the blend)
@@ -237,12 +345,13 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     return { yaw: Math.round(yaw), pitch: Math.round(pitch) };
   }, []);
 
-  // Disable auto-rotate while Pick mode is active (so the crosshair doesn't drift).
+  // Disable auto-rotate while Pick mode is active (so the crosshair doesn't drift)
+  // and during the intro (the shader drives the view, the camera must stay put).
   useEffect(() => {
     if (!ready) return;
     const cam = cameraRef.current as unknown as { setAttribute(c: string, p: string, v: unknown): void } | null;
-    cam?.setAttribute('idle-rotate', 'enabled', !pickerActive);
-  }, [pickerActive, ready]);
+    cam?.setAttribute('idle-rotate', 'enabled', !pickerActive && !introPlaying);
+  }, [pickerActive, introPlaying, ready]);
 
   if (!ready) return <LoadingScreen message="Menyiapkan mesin VR…" />;
 
@@ -251,7 +360,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-lg text-neutral-800">Ruang tidak ditemukan.</p>
         <Link href="/vr" className="text-brand hover:underline">
-          ← Kembali ke daftar ruang
+          ← Kembali ke awal tur
         </Link>
       </main>
     );
@@ -294,9 +403,16 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
             geometry="primitive: ring; radiusInner: 0.015; radiusOuter: 0.025"
             material="color: #ffffff; shader: flat; opacity: 0.9"
           />
+
+          {/* Little Planet intro quad — a child of the camera, 1 unit in front, so
+              it always fills the view. Hidden except while the intro plays. */}
+          <a-entity ref={planetRef} little-planet-intro="" position="0 0 -1" />
         </a-camera>
 
-        {hotspotsVisible && activeScene && (
+        {/* Held back during the intro so the hotspots play their grow-in animation
+            when the planet finishes unrolling, rather than popping in fully grown
+            behind the intro quad. */}
+        {hotspotsVisible && activeScene && !introPlaying && (
           <HotspotLayer
             key={activeScene.id}
             hotspots={activeScene.hotspots}
@@ -323,15 +439,11 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         />
       </a-scene>
 
-      {/* Top bar — back button (+ Pick coordinate in testing mode) + VR Mode */}
+      {/* Top bar — Pick coordinate (testing mode only) + VR Mode.
+          No "all rooms" link here: browsing rooms lives in the footer's
+          "All Location" overlay, and there is no room-picker page anymore. */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-4">
         <div className="pointer-events-auto flex flex-col items-start gap-2">
-          <Link
-            href="/vr"
-            className="rounded-full bg-white/90 px-4 py-2 text-sm font-medium text-neutral-900 shadow-md backdrop-blur transition hover:bg-white"
-          >
-            ← Semua Ruang
-          </Link>
           {PICKER_ENABLED && (
             <button
               type="button"

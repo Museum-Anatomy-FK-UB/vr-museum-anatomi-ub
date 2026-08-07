@@ -22,6 +22,12 @@ interface BaseHotspot {
 export interface NavHotspot extends BaseHotspot {
   type: 'navigation';
   target_scene_id: string;
+  /**
+   * Optional one-off image (e.g. a door opening) shown in place, at the
+   * current scene's rotation, before crossfading to the target room. Frontend-only
+   * proposal, not yet part of the backend contract — safe to omit/ignore.
+   */
+  transition_url?: string;
 }
 
 /** Hotspot that opens the collection info panel */
@@ -53,4 +59,11 @@ export interface Scene {
   initial_pitch: number;
   hotspots: Hotspot[];
   order?: number;
+  /**
+   * Horizon tilt correction (degrees, roll around the viewing axis) — compensates
+   * for camera roll baked into the raw photo during capture, so the horizon
+   * renders level. Proposed backend field, not yet in the contract — see
+   * docs/API.md "Proposed additions". Optional; omit/0 = no correction.
+   */
+  horizon_roll?: number;
 }

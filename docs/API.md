@@ -170,9 +170,10 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `id`, `title`, `thumbnail_url` | — | yes | Same as SceneSummary |
 | `order` | number | no | Accepted by the frontend type but **not read anywhere at the detail level** — only `SceneSummary.order` (from the list endpoint) is actually used, for the floor plan pin label |
 | `panorama_url` | string (URL) | yes | Full-resolution equirectangular 360° photo |
-| `initial_yaw` | number (-180 to 180) | yes | Camera's starting horizontal angle when the room loads |
+| `initial_yaw` | number (-180 to 180) | yes | Camera's starting horizontal angle when the room loads — set this so the visitor arrives facing the interesting content/next hotspot, not a blank wall or the way they came from |
 | `initial_pitch` | number (-90 to 90) | yes (per current frontend type) | **Not read by any current rendering logic** — camera always starts level regardless of this value. Reserved for a future vertical-start-angle feature; safe to always send `0` |
 | `hotspots` | array | yes | Can be empty `[]` |
+| `horizon_roll` | number (degrees), optional | no | **Proposed addition, not yet implemented by backend** — see "Proposed additions" below |
 
 ### Hotspot
 
@@ -200,6 +201,39 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `audio_url` | string (URL) or `null` | no | Voice-over narration |
 | `video_url` | string (URL) or `null` | no | Accepted by the frontend type but **there is no video player in the UI yet** — reserved for a future feature, safe to always send `null` for now |
 | `portal_url` | string (URL) | no | Link to the matching Web Portal page |
+
+---
+
+## Proposed Additions (2026-08-06, not yet implemented by backend)
+
+Found while walking the real photos locally (`/dev/calibrate` — see that tool's
+comments). Both are optional/additive — omitting them is safe and falls back
+to current behavior (no roll correction, no transition frame).
+
+### `Scene.horizon_roll` (number, degrees, optional)
+
+Some of the raw 360° photos have a slight camera roll baked in from capture
+(horizon not level) — most are fine, but not all, seemingly inconsistent
+horizon-leveling at capture/export time. Rather than re-shooting/re-exporting
+every affected photo, the frontend can compensate at render time if the
+backend stores a manual correction angle per room, found empirically (drag a
+slider in `/dev/calibrate` until the horizon looks level, then save that
+number).
+
+- Column: `vr_rooms.horizon_roll` — `decimal(5,2)`, nullable, default `0`.
+- Expose in `VrSceneDetailResource` alongside `initial_yaw`/`initial_pitch`.
+- Frontend applies it as an extra Z-axis rotation on the panorama sphere,
+  same mechanism as `initial_yaw`'s Y-axis rotation — see
+  `components/vr/skyCrossfade.ts`.
+
+### `Hotspot.transition_url` (string URL, optional, navigation only)
+
+Lets a navigation hotspot show a one-off image (e.g. a door opening) in place
+before crossfading to the target room, instead of navigating instantly.
+Currently only used for the Lobby → Ruang 1 entrance. If this is useful
+elsewhere, it'd need a `vr_hotspots.transition_url` column (nullable); for now
+it's handled as frontend-only data (`lib/localPreviewData.ts`) since it's a
+single case — raise it with the backend team only if more rooms need it.
 
 ---
 

@@ -61,7 +61,7 @@ export function registerSkyCrossfade() {
     },
 
     /** Show the panorama for the first time — instant (there's no "old" one to blend yet). */
-    setInitial(this: any, url: string, rotationYDeg: number) {
+    setInitial(this: any, url: string, rotationYDeg: number, rollZDeg = 0) {
       const THREE = AFRAME.THREE;
       const active = this.activeIsA ? this.meshA : this.meshB;
       return new Promise<void>((resolve) => {
@@ -73,7 +73,10 @@ export function registerSkyCrossfade() {
             active.material.map = tex;
             active.material.opacity = 1;
             active.material.needsUpdate = true;
-            active.rotation.y = THREE.MathUtils.degToRad(rotationYDeg || 0);
+            // y = initial_yaw (facing on arrival), z = horizon_roll (per-photo tilt
+            // correction — same convention as the /dev/calibrate tool, MUST stay
+            // identical or hotspots captured there will be misaligned here).
+            active.rotation.set(0, THREE.MathUtils.degToRad(rotationYDeg || 0), THREE.MathUtils.degToRad(rollZDeg || 0));
             this.currentSrc = url;
             resolve();
           },
@@ -84,7 +87,7 @@ export function registerSkyCrossfade() {
     },
 
     /** Blend from the current panorama to a new one — direct dissolve, no black. */
-    crossfadeTo(this: any, url: string, rotationYDeg: number, duration = 700) {
+    crossfadeTo(this: any, url: string, rotationYDeg: number, duration = 700, rollZDeg = 0) {
       const THREE = AFRAME.THREE;
       if (url === this.currentSrc) return Promise.resolve();
       return new Promise<void>((resolve) => {
@@ -99,7 +102,7 @@ export function registerSkyCrossfade() {
             incoming.material.map = tex;
             incoming.material.needsUpdate = true;
             incoming.material.opacity = 0;
-            incoming.rotation.y = THREE.MathUtils.degToRad(rotationYDeg || 0);
+            incoming.rotation.set(0, THREE.MathUtils.degToRad(rotationYDeg || 0), THREE.MathUtils.degToRad(rollZDeg || 0));
             outgoing.material.opacity = 1; // ensure full baseline before fading out
 
             this.currentSrc = url;

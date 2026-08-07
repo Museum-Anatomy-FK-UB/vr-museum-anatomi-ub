@@ -3,8 +3,18 @@
 
 import type { Scene, SceneSummary } from '@/lib/types/tour';
 import type { Collection } from '@/lib/types/collection';
+import { previewCollections, previewScenes, previewSceneList } from '@/lib/localPreviewData';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+/**
+ * TEMPORARY: serves lib/localPreviewData.ts instead of the backend, so the real
+ * /vr route can be walked with real photos + calibrated hotspots before that
+ * data exists in the backend. Off by default — only set in your own .env.local,
+ * never in .env.example. Remove this flag + lib/localPreviewData.ts once the
+ * backend has real rooms/hotspots/collections seeded.
+ */
+const LOCAL_PREVIEW = process.env.NEXT_PUBLIC_LOCAL_PREVIEW === 'true';
 
 /** Extract `data` from a `{ data: ... }` response per the docs/API.md contract. */
 async function request<T>(path: string): Promise<T> {
@@ -27,16 +37,27 @@ function useSlugAsId<T extends { id: string; slug_name?: string }>(item: T): T {
 }
 
 export async function getScenes(): Promise<SceneSummary[]> {
+  if (LOCAL_PREVIEW) return previewSceneList;
   const scenes = await request<SceneSummary[]>('/vr/scenes');
   return scenes.map(useSlugAsId);
 }
 
 export async function getScene(sceneId: string): Promise<Scene> {
+  if (LOCAL_PREVIEW) {
+    const scene = previewScenes[sceneId];
+    if (!scene) throw new Error(`Scene "${sceneId}" not found (local preview)`);
+    return scene;
+  }
   const scene = await request<Scene>(`/vr/scenes/${sceneId}`);
   return useSlugAsId(scene);
 }
 
 export async function getCollection(id: string): Promise<Collection> {
+  if (LOCAL_PREVIEW) {
+    const collection = previewCollections[id];
+    if (!collection) throw new Error(`Collection "${id}" not found (local preview)`);
+    return collection;
+  }
   const collection = await request<Collection>(`/vr/collections/${id}`);
   return useSlugAsId(collection);
 }
