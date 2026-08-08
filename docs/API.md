@@ -185,6 +185,8 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `pitch` | number (-90 to 90) | yes | |
 | `label` | string | yes | Shown as a text caption above the hotspot |
 | `arrow` | `"up"` \| `"down"` \| `"left"` \| `"right"` | no | Navigation only (ignored for `info`); defaults to `up` if omitted |
+| `variant` | `"arrow"` \| `"door"` | no | Navigation only. `door` = upright, camera-facing coin for an entrance/door; `arrow` (default) = tilted floor-marker. See **Proposed Additions** |
+| `arrow_deg` | number (0–360) | no | Navigation only. Free arrow rotation in degrees; overrides `arrow` when set. See **Proposed Additions** |
 | `target_scene_id` | string | required if `type: navigation` | Must match an existing `Scene.id` — see referential integrity note below |
 | `collection_id` | string | required if `type: info` | Must match an existing `Collection.id` |
 
@@ -207,8 +209,8 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 ## Proposed Additions (2026-08-06, not yet implemented by backend)
 
 Found while walking the real photos locally (`/dev/calibrate` — see that tool's
-comments). Both are optional/additive — omitting them is safe and falls back
-to current behavior (no roll correction, no transition frame).
+comments). All are optional/additive — omitting any is safe and falls back to
+current behavior (no roll correction, tilted 4-way arrows, no transition frame).
 
 ### `Scene.horizon_roll` (number, degrees, optional)
 
@@ -225,6 +227,30 @@ number).
 - Frontend applies it as an extra Z-axis rotation on the panorama sphere,
   same mechanism as `initial_yaw`'s Y-axis rotation — see
   `components/vr/skyCrossfade.ts`.
+
+### `Hotspot.variant` (`"arrow"` | `"door"`, optional, navigation only)
+
+Visual style of a navigation hotspot:
+- `arrow` (default) — a tilted coin that lies down like a floor marker, for
+  general room-to-room movement.
+- `door` — an **upright** coin facing the camera (like an info hotspot) with a
+  door icon, for an entrance the visitor walks through.
+
+Used for entrances such as Lobby ↔ Ruang 1 and Ruang 17 → restricted-18.
+
+- Column: `vr_hotspots.variant` — string/enum `arrow`|`door`, nullable, default `arrow`.
+- Expose in `VrSceneDetailResource.hotspots[]`.
+- Frontend renders it in `components/vr/HotspotLayer.tsx`.
+
+### `Hotspot.arrow_deg` (number 0–360, optional, navigation only)
+
+Free rotation of the arrow icon (in degrees), so a navigation arrow can point
+any direction — not just the 4 cardinal `arrow` values. When set, it **overrides**
+`arrow`. `0` points forward/away (toward the destination), increasing clockwise.
+Ignored for the `door` variant. Captured with the slider in `/dev/calibrate`.
+
+- Column: `vr_hotspots.arrow_deg` — `decimal(6,2)` (or int), nullable.
+- Expose in `VrSceneDetailResource.hotspots[]`.
 
 ### `Hotspot.transition_url` (string URL, optional, navigation only)
 

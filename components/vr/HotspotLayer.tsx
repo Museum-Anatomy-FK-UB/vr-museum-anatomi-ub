@@ -93,8 +93,8 @@ const ARROW_DEG: Record<HotspotArrow, number> = { up: 0, right: -90, down: 180, 
  * texture on a single plane, no other mesh (besides the pulse ring) can "fight"
  * over the depth buffer.
  */
-function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
-  const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : 'face-info';
+function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door', arrowDeg = 0): string {
+  const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : `face-${kind}`;
   return cachedTexture(key, 256, (ctx, size) => {
     const cx = size / 2;
     const cy = size / 2;
@@ -147,6 +147,28 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
       ctx.lineTo(-9 * s, 7 * s);
       ctx.closePath();
       ctx.fill();
+    } else if (kind === 'door') {
+      // A simple door glyph: rounded-top panel + a knob, so an entrance reads
+      // differently from a plain navigation arrow while staying the same coin.
+      const w = coinR * 0.5;
+      const h = coinR * 0.92;
+      const x = -w / 2;
+      const y = -h / 2;
+      const r = w * 0.16;
+      ctx.beginPath();
+      ctx.moveTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+      ctx.fill();
+      // Knob — punched in the coin's dark tone so it reads as a door handle.
+      ctx.fillStyle = '#141414';
+      ctx.beginPath();
+      ctx.arc(x + w - w * 0.24, 0, w * 0.1, 0, Math.PI * 2);
+      ctx.fill();
     } else {
       const dotR = coinR * 0.1;
       ctx.beginPath();
@@ -172,7 +194,7 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
 }
 
 /** Convert yaw/pitch (degrees) to a 3D position on a sphere of the given radius. */
-function toPosition(yaw: number, pitch: number, radius = 6): string {
+export function toPosition(yaw: number, pitch: number, radius = 6): string {
   const y = (yaw * Math.PI) / 180;
   const p = (pitch * Math.PI) / 180;
   const x = radius * Math.cos(p) * Math.sin(y);
@@ -193,20 +215,37 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
     return () => el.removeEventListener('click', handler);
   }, [onActivate]);
 
-  const isArrow = hotspot.type === 'navigation';
-  const faceTexture = isArrow
-    ? getHotspotFaceTexture('arrow', ARROW_DEG[hotspot.arrow ?? 'up'])
+  // Three visual styles:
+  // - tilted arrow: general room-to-room navigation (lies down like a floor marker)
+  // - door: an UPRIGHT navigation hotspot for an entrance (variant === 'door')
+  // - info: upright collection hotspot (with a nod animation)
+  const isNav = hotspot.type === 'navigation';
+  const isDoor = isNav && hotspot.variant === 'door';
+  const isTiltedArrow = isNav && !isDoor;
+
+  // Arrow angle: an explicit `arrow_deg` (free 0–360 rotation) wins over the
+  // 4-way `arrow`; rounded so the baked-texture cache stays bounded.
+  const arrowDeg =
+    isTiltedArrow && hotspot.type === 'navigation'
+      ? Math.round(hotspot.arrow_deg ?? ARROW_DEG[hotspot.arrow ?? 'up'])
+      : 0;
+
+  const faceTexture = isDoor
+    ? getHotspotFaceTexture('door')
+    : isTiltedArrow
+    ? getHotspotFaceTexture('arrow', arrowDeg)
     : getHotspotFaceTexture('info');
 
-  // Navigation hotspots "lie down" like a floor marker (instead of floating
+  // Tilted-arrow hotspots "lie down" like a floor marker (instead of floating
   // upright facing the camera) — an X rotation on the local axis, still valid for
   // any yaw because the parent's Y rotation (billboard) doesn't change the child's
   // local X axis (still horizontal). STATIC, NO animation (no wobble/flip) — -78°
   // (not a full -90) so it tilts slightly, not perfectly flat, and its face stays
   // somewhat visible to the camera instead of lying completely flat.
-  // Info hotspots STAY upright facing the camera + the nod animation (unchanged).
+  // Door and Info hotspots STAY upright facing the camera (rotation 0 0 0); Info
+  // adds the nod animation, Door stays static.
   const NAV_TILT = -78;
-  const flatRotation = isArrow ? `${NAV_TILT} 0 0` : '0 0 0';
+  const flatRotation = isTiltedArrow ? `${NAV_TILT} 0 0` : '0 0 0';
 
   return (
     <a-entity
@@ -240,16 +279,18 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
 
         {/* Hotspot face: glow + coin + rim + icon in ONE texture, ONE plane —
             no other mesh can z-fight anymore.
-            Navigation: STATIC tilted rotation (-78°, see NAV_TILT), no animation
-            — no wobble/flip. Info: upright + nod animation. */}
+            Tilted arrow: STATIC tilted rotation (-78°, see NAV_TILT), no animation.
+            Door: STATIC upright. Info: upright + nod animation. */}
         <a-image
           hotspot-layer="order: 1"
           src={faceTexture}
           width="1.05"
           height="1.05"
           material="shader: flat; side: double; transparent: true; alphaTest: 0.02"
-          {...(isArrow
+          {...(isTiltedArrow
             ? { rotation: flatRotation }
+            : isDoor
+            ? { rotation: '0 0 0' }
             : {
                 animation__tilt:
                   'property: rotation; from: -16 0 0; to: 16 0 0; dir: alternate; loop: true; dur: 2200; easing: easeInOutSine',

@@ -86,8 +86,13 @@ export function registerSkyCrossfade() {
       });
     },
 
-    /** Blend from the current panorama to a new one — direct dissolve, no black. */
-    crossfadeTo(this: any, url: string, rotationYDeg: number, duration = 700, rollZDeg = 0) {
+    /**
+     * Blend from the current panorama to a new one — direct dissolve, no black.
+     * `pushDistance` overrides the schema's push for this one transition: pass 0
+     * for a PURE dissolve with no "forward" motion (e.g. a closed→open door photo
+     * swap in place); omit it to use the default forward push (room-to-room moves).
+     */
+    crossfadeTo(this: any, url: string, rotationYDeg: number, duration = 700, rollZDeg = 0, pushDistance = this.data.push) {
       const THREE = AFRAME.THREE;
       if (url === this.currentSrc) return Promise.resolve();
       return new Promise<void>((resolve) => {
@@ -114,11 +119,12 @@ export function registerSkyCrossfade() {
             // "Forward" effect: pull the OLD panorama sphere behind the camera so
             // the surface in front approaches (grows). The direction is taken from
             // the CURRENT camera view. The new panorama stays at the origin — it doesn't move.
+            // pushDistance === 0 → skip entirely for a pure dissolve (no forward motion).
             const cam3 = this.el.sceneEl?.camera;
-            if (cam3) {
+            if (cam3 && pushDistance) {
               const dir = new THREE.Vector3();
               cam3.getWorldDirection(dir);
-              this._pushVec = dir.multiplyScalar(-this.data.push);
+              this._pushVec = dir.multiplyScalar(-pushDistance);
             } else {
               this._pushVec = null;
             }

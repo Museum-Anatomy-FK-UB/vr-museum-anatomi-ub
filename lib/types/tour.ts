@@ -6,6 +6,17 @@ export type HotspotType = 'navigation' | 'info';
 /** Arrow direction for navigation hotspots (default 'up'). */
 export type HotspotArrow = 'up' | 'down' | 'left' | 'right';
 
+/**
+ * Visual style of a navigation hotspot:
+ * - 'arrow' (default) — the floor-marker coin that lies down tilted, for
+ *   general room-to-room movement.
+ * - 'door' — an UPRIGHT coin facing the camera (like an info hotspot), for
+ *   an entrance/door the visitor walks through (e.g. Lobby → Ruang 1).
+ * Frontend-only presentational field, not part of the backend contract —
+ * safe to omit/ignore (defaults to 'arrow'), same treatment as `transition_url`.
+ */
+export type NavHotspotVariant = 'arrow' | 'door';
+
 interface BaseHotspot {
   id: string;
   type: HotspotType;
@@ -22,6 +33,19 @@ interface BaseHotspot {
 export interface NavHotspot extends BaseHotspot {
   type: 'navigation';
   target_scene_id: string;
+  /**
+   * Visual style — 'arrow' (tilted floor marker, default) or 'door' (upright,
+   * facing the camera). See {@link NavHotspotVariant}. Frontend-only, optional.
+   */
+  variant?: NavHotspotVariant;
+  /**
+   * Arrow rotation in degrees (0–360) for the tilted 'arrow' variant, letting the
+   * arrow point any direction — not just the 4 cardinal `arrow` values. When set,
+   * it overrides `arrow`. 0 = points forward/away (toward the destination), turning
+   * clockwise. Ignored for the 'door' variant. Frontend-only presentational field,
+   * not part of the backend contract — safe to omit/ignore (falls back to `arrow`).
+   */
+  arrow_deg?: number;
   /**
    * Optional one-off image (e.g. a door opening) shown in place, at the
    * current scene's rotation, before crossfading to the target room. Frontend-only

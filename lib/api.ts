@@ -61,3 +61,31 @@ export async function getCollection(id: string): Promise<Collection> {
   const collection = await request<Collection>(`/vr/collections/${id}`);
   return useSlugAsId(collection);
 }
+
+/**
+ * Authenticate for the restricted area. Posts to the backend's `/login`
+ * (Laravel Sanctum). Resolves on success, throws with a message on failure.
+ *
+ * NOTE (security): this is only the FRONT-END gate. The restricted room's data
+ * endpoint (`/api/vr/scenes/restricted-*`) is still public on the backend, so
+ * real protection requires the backend to require a valid token there. See
+ * docs/HANDOFF-BACKEND-VR-DATA.md.
+ */
+export async function login(email: string, password: string): Promise<void> {
+  if (LOCAL_PREVIEW) {
+    // Preview/demo: no backend running. Accept any valid-looking credentials so the
+    // restricted-area gate can be demonstrated end-to-end. Real validation happens
+    // against the backend in production (the branch below).
+    await new Promise((r) => setTimeout(r, 500));
+    if (!/.+@.+\..+/.test(email) || password.length < 4) {
+      throw new Error('Email atau password tidak valid.');
+    }
+    return;
+  }
+  const res = await fetch(`${BASE_URL}/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error('Email atau password salah.');
+}

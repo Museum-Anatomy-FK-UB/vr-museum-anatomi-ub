@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import type { Scene, SceneSummary } from '@/lib/types/tour';
 import { getScene, getScenes } from '@/lib/api';
 import HotspotLayer, { registerHotspotLayer } from './HotspotLayer';
 import HotspotInfo from './HotspotInfo';
-import VRModeButton from './VRModeButton';
 import SceneControlsBar from './SceneControlsBar';
 import SceneGallery from './SceneGallery';
 import FloorplanMap from './FloorplanMap';
 import HotspotPicker from './HotspotPicker';
+import RestrictedLoginModal from './RestrictedLoginModal';
 import { registerIdleRotate } from './idleRotate';
 import { registerSmoothDragLook } from './smoothDragLook';
 import { registerSkyCrossfade } from './skyCrossfade';
@@ -18,11 +19,30 @@ import { registerScrollZoom } from './scrollZoom';
 import { registerLittlePlanetIntro } from './littlePlanetIntro';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
-// The "Pick coordinate" tool helps whoever is placing hotspots find yaw/pitch —
-// dev-only, auto-hidden in production builds.
-const PICKER_ENABLED = process.env.NODE_ENV !== 'production';
-
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// --- Restricted-area gate --------------------------------------------------
+// Rooms whose slug starts with "restricted-" require a login before entering,
+// both via the door hotspot AND via a direct URL. The unlock is per browser
+// session. NOTE: this is a front-end gate only — real protection needs the
+// backend to require auth on the restricted room's data endpoint.
+const RESTRICTED_KEY = 'vr-restricted-unlocked';
+const isRestricted = (id: string) => id.startsWith('restricted-');
+function readUnlocked(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.sessionStorage.getItem(RESTRICTED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+function writeUnlocked(): void {
+  try {
+    window.sessionStorage.setItem(RESTRICTED_KEY, '1');
+  } catch {
+    // best-effort
+  }
+}
 
 /**
  * A-Frame initializes an entity's components asynchronously, so right after React
@@ -100,6 +120,10 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [hotspotsVisible, setHotspotsVisible] = useState(true);
   const [pickerActive, setPickerActive] = useState(false);
   const [introPlaying, setIntroPlaying] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [pendingSceneId, setPendingSceneId] = useState<string | null>(null);
+
+  const router = useRouter();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const skyRef = useRef<HTMLElement>(null);
@@ -181,21 +205,32 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     };
   }, [ready]);
 
-  // 2) Load the initial scene + the list of all rooms (for the "All Location" gallery).
+  // Load a scene as the FIRST panorama (setInitial, not a crossfade). Reused on
+  // mount and after a successful restricted-area login (direct-URL case).
+  const startScene = useCallback(async (id: string) => {
+    try {
+      const scene = await getScene(id);
+      // Wait for the component rather than reading it optionally: if it isn't ready
+      // yet the panorama would silently never load at all.
+      const sky = await waitForComponent(skyRef.current, 'sky-crossfade');
+      await sky?.setInitial(scene.panorama_url, scene.initial_yaw ?? 0, scene.horizon_roll ?? 0);
+      setActiveScene(scene);
+    } catch {
+      setLoadError(true);
+    }
+  }, []);
+
+  // 2) Load the initial scene (gated for restricted rooms) + the list of all rooms.
   useEffect(() => {
     if (!ready) return;
     let mounted = true;
-    getScene(initialSceneId)
-      .then(async (scene) => {
-        // Wait for the component rather than reading it optionally: if it isn't
-        // ready yet the panorama would silently never load at all.
-        const sky = await waitForComponent(skyRef.current, 'sky-crossfade');
-        await sky?.setInitial(scene.panorama_url, scene.initial_yaw ?? 0, scene.horizon_roll ?? 0);
-        if (mounted) setActiveScene(scene);
-      })
-      .catch(() => {
-        if (mounted) setLoadError(true);
-      });
+    if (isRestricted(initialSceneId) && !readUnlocked()) {
+      // Direct URL into a restricted room: block it and require login first.
+      setPendingSceneId(initialSceneId);
+      setLoginOpen(true);
+    } else {
+      startScene(initialSceneId);
+    }
     getScenes()
       .then((list) => {
         if (mounted) setSceneList(list);
@@ -204,7 +239,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     return () => {
       mounted = false;
     };
-  }, [ready, initialSceneId]);
+  }, [ready, initialSceneId, startScene]);
 
   // 3) Intro reveal: "Little Planet" opening — the panorama starts curled into a
   //    small planet seen from above, then unrolls into the normal view. Only on
@@ -270,18 +305,28 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   // the new ones grow in mid-blend — no abrupt appear/disappear.
   const navigateTo = useCallback(async (targetId: string, transitionUrl?: string) => {
     if (transitioningRef.current || targetId === currentIdRef.current) return;
+    // Restricted rooms require a login first (also blocks the door hotspot).
+    if (isRestricted(targetId) && !readUnlocked()) {
+      setPendingSceneId(targetId);
+      setLoginOpen(true);
+      return;
+    }
     transitioningRef.current = true;
     const cam = cameraRef.current;
     const sky = skyRef.current as unknown as { components?: Record<string, any> } | null;
     try {
       // Optional one-off frame (e.g. a door opening) shown in place, at the
       // current scene's own rotation, before the real crossfade to the target room.
+      // PURE DISSOLVE (push = 0): the closed→open door photos are the same view,
+      // so there must be no "forward" motion here — only the later crossfade into
+      // the target room (below) pushes forward.
       if (transitionUrl) {
         await sky?.components?.['sky-crossfade']?.crossfadeTo(
           transitionUrl,
           activeSceneRef.current?.initial_yaw ?? 0,
           500,
           activeSceneRef.current?.horizon_roll ?? 0,
+          0,
         );
         await wait(350);
       }
@@ -332,6 +377,37 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     else document.exitFullscreen?.();
   }, []);
 
+  // Enter VR / Cardboard — replicates A-Frame's built-in enter-VR button, which
+  // we hide (see globals.css) so VR is triggered from the footer control bar instead.
+  const enterVR = useCallback(() => {
+    const sceneEl = document.querySelector('a-scene') as unknown as { enterVR?: () => void } | null;
+    sceneEl?.enterVR?.();
+  }, []);
+
+  // Restricted-area login handlers.
+  const onLoginSuccess = () => {
+    writeUnlocked();
+    setLoginOpen(false);
+    const target = pendingSceneId;
+    setPendingSceneId(null);
+    if (!target) return;
+    if (!currentIdRef.current) startScene(target); // direct-URL: nothing loaded yet
+    else navigateTo(target); // door hotspot: navigate in-tour
+  };
+  const onLoginClose = () => {
+    setLoginOpen(false);
+    const wasDirect = !currentIdRef.current;
+    setPendingSceneId(null);
+    // Door-hotspot case (wasDirect === false): the scene never changed, so just
+    // closing the modal keeps the visitor exactly where they were (e.g. /vr/17).
+    // Direct-URL bypass case (wasDirect === true): nothing is loaded here — send
+    // them back to the room they came from if possible, otherwise the main tour.
+    if (wasDirect) {
+      if (window.history.length > 1) router.back();
+      else router.replace('/vr');
+    }
+  };
+
   // Read yaw/pitch from the camera direction (for the Pick coordinate tool).
   const getPickerCoords = useCallback(() => {
     const camEl = cameraRef.current as unknown as { getObject3D?: (n: string) => any } | null;
@@ -357,10 +433,38 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
 
   if (loadError) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
-        <p className="text-lg text-neutral-800">Ruang tidak ditemukan.</p>
-        <Link href="/vr" className="text-brand hover:underline">
-          ← Kembali ke awal tur
+      <main className="fixed inset-0 flex flex-col items-center justify-center gap-6 bg-[#0a1226] p-6 text-center">
+        {/* Faint amber glow behind the 404 */}
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'radial-gradient(circle at 50% 42%, rgba(251,191,36,0.10), transparent 55%)' }}
+        />
+
+        {/* Logos */}
+        <div className="relative flex items-center gap-5">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/panorama/logo/Logo_Universitas_Brawijaya.png" alt="Universitas Brawijaya" className="h-14 w-auto" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/panorama/logo/Logo_FKUB.webp" alt="FK UB" className="h-14 w-auto" />
+        </div>
+
+        {/* 404 */}
+        <div className="relative flex flex-col items-center">
+          <span className="text-7xl font-black leading-none tracking-tight text-amber-400 drop-shadow-[0_4px_24px_rgba(251,191,36,0.35)] sm:text-8xl">
+            404
+          </span>
+          <p className="mt-3 text-xl font-semibold text-white">Ruang tidak ditemukan</p>
+          <p className="mt-1.5 max-w-xs text-sm text-white/55">
+            Tautan yang Anda buka tidak tersedia atau sudah dipindahkan.
+          </p>
+        </div>
+
+        <Link
+          href="/vr"
+          className="relative rounded-xl bg-amber-400 px-6 py-2.5 text-sm font-bold text-[#0a1226] transition hover:bg-amber-300"
+        >
+          Kembali ke awal tur
         </Link>
       </main>
     );
@@ -439,32 +543,22 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         />
       </a-scene>
 
-      {/* Top bar — Pick coordinate (testing mode only) + VR Mode.
-          No "all rooms" link here: browsing rooms lives in the footer's
-          "All Location" overlay, and there is no room-picker page anymore. */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 p-4">
-        <div className="pointer-events-auto flex flex-col items-start gap-2">
-          {PICKER_ENABLED && (
-            <button
-              type="button"
-              onClick={() => setPickerActive((v) => !v)}
-              className={`rounded-full px-4 py-2 text-sm font-medium shadow-md backdrop-blur transition ${
-                pickerActive ? 'bg-brand text-white' : 'bg-white/90 text-neutral-900 hover:bg-white'
-              }`}
-            >
-              {pickerActive ? '● Pick aktif' : 'Pick koordinat'}
-            </button>
-          )}
+      {/* Brand — top-left: FK UB logo + museum name */}
+      <div className="pointer-events-none absolute left-5 top-5 z-20 flex flex-col items-start gap-2.5 drop-shadow-lg">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/panorama/logo/Logo_FKUB.webp" alt="Logo FK UB" className="h-16 w-auto md:h-20" />
+        <div className="max-w-[75vw] leading-tight text-white sm:max-w-none">
+          <p className="text-sm font-bold tracking-wide sm:text-base md:text-lg">MUSEUM ANATOMY FAKULTAS KEDOKTERAN</p>
+          <p className="text-xs font-medium text-white/85 sm:text-sm md:text-base">UNIVERSITAS BRAWIJAYA</p>
         </div>
-        <VRModeButton />
       </div>
 
-      {/* Room title — bottom-left, FILKOM style */}
-      <div className="pointer-events-none absolute bottom-5 left-5 z-20">
-        <h1 className="text-2xl font-semibold text-white drop-shadow-lg">
+      {/* Room title — bottom-left. Bigger + responsive; hidden on small screens
+          where it would collide with the centered control bar. */}
+      <div className="pointer-events-none absolute bottom-5 left-5 z-20 hidden sm:block">
+        <h1 className="text-3xl font-semibold text-white drop-shadow-lg md:text-4xl">
           {activeScene?.title ?? 'Memuat…'}
         </h1>
-        <p className="text-sm italic text-white/80 drop-shadow-lg">Museum Anatomi FK UB</p>
       </div>
 
       {/* Footer control bar */}
@@ -478,6 +572,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         onToggleFloorplan={() => setFloorplanOpen((v) => !v)}
         floorplanOpen={floorplanOpen}
         onToggleFullscreen={toggleFullscreen}
+        onEnterVR={enterVR}
         hotspotsVisible={hotspotsVisible}
         onToggleHotspots={() => setHotspotsVisible((v) => !v)}
       />
@@ -526,11 +621,14 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       />
 
       {/* Spinner while the initial scene isn't ready (on top of the black curtain) */}
-      {!activeScene && (
+      {!activeScene && !loginOpen && (
         <div className="absolute inset-0 z-40 flex items-center justify-center">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-neutral-700 border-t-white" />
         </div>
       )}
+
+      {/* Restricted-area login gate */}
+      {loginOpen && <RestrictedLoginModal onSuccess={onLoginSuccess} onClose={onLoginClose} />}
     </div>
   );
 }
