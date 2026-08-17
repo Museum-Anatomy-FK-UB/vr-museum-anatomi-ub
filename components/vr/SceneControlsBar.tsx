@@ -3,7 +3,7 @@
 // Footer control bar, 3DVista/FILKOM-style: Main Location, All Location,
 // Toggle Fullscreen, Show/Hide Hotspot. Icons = inline SVG (no new dependency).
 
-const ICON = 'h-5 w-5';
+const ICON = 'h-7 w-7';
 
 function BuildingIcon() {
   return (
@@ -50,6 +50,14 @@ function EyeIcon() {
   );
 }
 
+function VrIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={ICON}>
+      <path d="M4 8h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-4.2a2 2 0 0 1-1.8-1.1l-.5-1a1.7 1.7 0 0 0-3 0l-.5 1A2 2 0 0 1 8.2 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2Z" />
+    </svg>
+  );
+}
+
 function EyeOffIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={ICON}>
@@ -73,15 +81,19 @@ function ControlButton({
     <button
       type="button"
       onClick={onClick}
-      title={label}
       aria-label={label}
       aria-pressed={active}
-      className={`flex w-[76px] flex-col items-center gap-1 rounded-lg px-2 py-2 transition ${
-        active ? 'bg-white/20 text-white' : 'text-white/90 hover:bg-white/15 hover:text-white'
+      className={`group relative flex h-12 w-12 items-center justify-center rounded-xl transition ${
+        active
+          ? 'bg-blue-600 text-white shadow-md'
+          : 'text-white/80 hover:bg-white/10 hover:text-white'
       }`}
     >
       {children}
-      <span className="text-[10px] font-medium leading-none">{label}</span>
+      {/* Label appears only on hover, as a floating tooltip above the icon. */}
+      <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-2 -translate-x-1/2 whitespace-nowrap rounded-lg bg-white px-3 py-1.5 text-[13px] font-semibold text-neutral-900 opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100">
+        {label}
+      </span>
     </button>
   );
 }
@@ -92,6 +104,7 @@ export default function SceneControlsBar({
   onToggleFloorplan,
   floorplanOpen,
   onToggleFullscreen,
+  onEnterVR,
   hotspotsVisible,
   onToggleHotspots,
 }: {
@@ -100,12 +113,13 @@ export default function SceneControlsBar({
   onToggleFloorplan: () => void;
   floorplanOpen: boolean;
   onToggleFullscreen: () => void;
+  onEnterVR: () => void;
   hotspotsVisible: boolean;
   onToggleHotspots: () => void;
 }) {
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex justify-center pb-4">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl bg-black/55 px-2 py-1.5 shadow-lg backdrop-blur">
+      <div className="pointer-events-auto flex items-center gap-1 rounded-2xl border border-white/10 bg-[#161d33]/85 px-2 py-2 shadow-2xl backdrop-blur-md">
         <ControlButton label="Main Location" onClick={onMainLocation}>
           <BuildingIcon />
         </ControlButton>
@@ -117,6 +131,9 @@ export default function SceneControlsBar({
         </ControlButton>
         <ControlButton label="Fullscreen" onClick={onToggleFullscreen}>
           <FullscreenIcon />
+        </ControlButton>
+        <ControlButton label="Mode VR" onClick={onEnterVR}>
+          <VrIcon />
         </ControlButton>
         <ControlButton
           label={hotspotsVisible ? 'Hide Hotspot' : 'Show Hotspot'}

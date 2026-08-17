@@ -4,34 +4,60 @@ import { useEffect, useRef } from 'react';
 import type { Hotspot, HotspotArrow } from '@/lib/types/tour';
 
 // ---- Stable layering for the hotspot's flat, semi-transparent pieces -------
-// Hotspots sit ~6 units from the camera. At that distance A-Frame's default
-// near/far clipping gives the depth buffer poor precision, so any two
-// near-coplanar transparent meshes (coin, rings, glow) can flicker or
-// half-render depending on camera angle — this is what caused the
-// "half cut" / "black box" artifacts. Disabling depth test/write on these
-// layers and forcing an explicit renderOrder makes the stacking
-// deterministic regardless of GPU precision.
-function registerLayerOrderComponent() {
+// Hotspots sit ~6 units from the camera, all mutually near-coplanar, so their
+// draw order must be pinned explicitly or they flicker/half-render depending on
+// camera angle.
+//
+// The offset below matters: sky-crossfade's two panorama spheres use
+// renderOrder 0 and 1, so a hotspot left on 0/1 lands in the SAME sorting
+// buckets as the sky. Whenever the active sky happens to be the renderOrder-1
+// mesh (they alternate on every room transition), that sky is drawn AFTER the
+// hotspots — which is how a hotspot could look wrong in one room and fine in
+// the next, with no per-room difference in the data. Sitting above the sky's
+// range keeps hotspots on top in every room, in every crossfade parity.
+//
+// Depth flags are deliberately left at A-Frame's defaults: hotspots writing
+// depth is what stops the (much farther, depthWrite:false) sky sphere from
+// painting over them. Forcing depthWrite:false here makes hotspots vanish
+// entirely in rooms whose active sky sorts later.
+const HOTSPOT_RENDER_ORDER_BASE = 10;
+
+export function registerHotspotLayer() {
   const AFRAME = (window as unknown as { AFRAME?: any }).AFRAME;
   if (!AFRAME || AFRAME.components['hotspot-layer']) return;
   AFRAME.registerComponent('hotspot-layer', {
     schema: { order: { type: 'number', default: 0 } },
-    init(this: { el: any; apply: () => void }) {
+    init(this: { el: any; apply: () => void; onMeshSet: (e: any) => void }) {
       this.apply = this.apply.bind(this);
+      // 'object3dset' is what A-Frame itself waits on when a component needs the
+      // mesh that another component (geometry) creates — 'loaded' is the wrong
+      // signal here and had already fired by the time this ran, so renderOrder
+      // silently never landed and hotspots fell back into the sky's sort buckets.
+      this.onMeshSet = (evt: any) => {
+        if (evt.detail?.type === 'mesh' && evt.target === this.el) this.apply();
+      };
+      this.el.addEventListener('object3dset', this.onMeshSet);
       if (this.el.getObject3D('mesh')) this.apply();
-      this.el.addEventListener('loaded', this.apply);
+    },
+    update(this: { apply: () => void }) {
+      this.apply();
+    },
+    remove(this: { el: any; onMeshSet: (e: any) => void }) {
+      this.el.removeEventListener('object3dset', this.onMeshSet);
     },
     apply(this: { el: any; data: { order: number } }) {
       const mesh = this.el.getObject3D('mesh') as { renderOrder: number; material?: any } | null;
-      if (!mesh || !mesh.material) return;
-      mesh.renderOrder = this.data.order;
+      if (!mesh?.material) return;
+      mesh.renderOrder = HOTSPOT_RENDER_ORDER_BASE + this.data.order;
+      // Safe only because renderOrder above puts hotspots past the sky's buckets:
+      // they're painted after it regardless of depth, so skipping depth here just
+      // removes the z-fighting between the hotspot's own near-coplanar layers.
       mesh.material.depthTest = false;
       mesh.material.depthWrite = false;
       mesh.material.needsUpdate = true;
     },
   });
 }
-if (typeof window !== 'undefined') registerLayerOrderComponent();
 
 // ---- Texture generation (cached, canvas-based) -----------------------------
 const textureCache = new Map<string, string>();
@@ -67,8 +93,8 @@ const ARROW_DEG: Record<HotspotArrow, number> = { up: 0, right: -90, down: 180, 
  * texture on a single plane, no other mesh (besides the pulse ring) can "fight"
  * over the depth buffer.
  */
-function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
-  const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : 'face-info';
+function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door', arrowDeg = 0): string {
+  const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : `face-${kind}`;
   return cachedTexture(key, 256, (ctx, size) => {
     const cx = size / 2;
     const cy = size / 2;
@@ -121,6 +147,28 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
       ctx.lineTo(-9 * s, 7 * s);
       ctx.closePath();
       ctx.fill();
+    } else if (kind === 'door') {
+      // A simple door glyph: rounded-top panel + a knob, so an entrance reads
+      // differently from a plain navigation arrow while staying the same coin.
+      const w = coinR * 0.5;
+      const h = coinR * 0.92;
+      const x = -w / 2;
+      const y = -h / 2;
+      const r = w * 0.16;
+      ctx.beginPath();
+      ctx.moveTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h);
+      ctx.lineTo(x, y + h);
+      ctx.closePath();
+      ctx.fill();
+      // Knob — punched in the coin's dark tone so it reads as a door handle.
+      ctx.fillStyle = '#141414';
+      ctx.beginPath();
+      ctx.arc(x + w - w * 0.24, 0, w * 0.1, 0, Math.PI * 2);
+      ctx.fill();
     } else {
       const dotR = coinR * 0.1;
       ctx.beginPath();
@@ -146,7 +194,7 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow', arrowDeg = 0): string {
 }
 
 /** Convert yaw/pitch (degrees) to a 3D position on a sphere of the given radius. */
-function toPosition(yaw: number, pitch: number, radius = 6): string {
+export function toPosition(yaw: number, pitch: number, radius = 6): string {
   const y = (yaw * Math.PI) / 180;
   const p = (pitch * Math.PI) / 180;
   const x = radius * Math.cos(p) * Math.sin(y);
@@ -167,20 +215,37 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
     return () => el.removeEventListener('click', handler);
   }, [onActivate]);
 
-  const isArrow = hotspot.type === 'navigation';
-  const faceTexture = isArrow
-    ? getHotspotFaceTexture('arrow', ARROW_DEG[hotspot.arrow ?? 'up'])
+  // Three visual styles:
+  // - tilted arrow: general room-to-room navigation (lies down like a floor marker)
+  // - door: an UPRIGHT navigation hotspot for an entrance (variant === 'door')
+  // - info: upright collection hotspot (with a nod animation)
+  const isNav = hotspot.type === 'navigation';
+  const isDoor = isNav && hotspot.variant === 'door';
+  const isTiltedArrow = isNav && !isDoor;
+
+  // Arrow angle: an explicit `arrow_deg` (free 0–360 rotation) wins over the
+  // 4-way `arrow`; rounded so the baked-texture cache stays bounded.
+  const arrowDeg =
+    isTiltedArrow && hotspot.type === 'navigation'
+      ? Math.round(hotspot.arrow_deg ?? ARROW_DEG[hotspot.arrow ?? 'up'])
+      : 0;
+
+  const faceTexture = isDoor
+    ? getHotspotFaceTexture('door')
+    : isTiltedArrow
+    ? getHotspotFaceTexture('arrow', arrowDeg)
     : getHotspotFaceTexture('info');
 
-  // Navigation hotspots "lie down" like a floor marker (instead of floating
+  // Tilted-arrow hotspots "lie down" like a floor marker (instead of floating
   // upright facing the camera) — an X rotation on the local axis, still valid for
   // any yaw because the parent's Y rotation (billboard) doesn't change the child's
   // local X axis (still horizontal). STATIC, NO animation (no wobble/flip) — -78°
   // (not a full -90) so it tilts slightly, not perfectly flat, and its face stays
   // somewhat visible to the camera instead of lying completely flat.
-  // Info hotspots STAY upright facing the camera + the nod animation (unchanged).
+  // Door and Info hotspots STAY upright facing the camera (rotation 0 0 0); Info
+  // adds the nod animation, Door stays static.
   const NAV_TILT = -78;
-  const flatRotation = isArrow ? `${NAV_TILT} 0 0` : '0 0 0';
+  const flatRotation = isTiltedArrow ? `${NAV_TILT} 0 0` : '0 0 0';
 
   return (
     <a-entity
@@ -214,16 +279,18 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
 
         {/* Hotspot face: glow + coin + rim + icon in ONE texture, ONE plane —
             no other mesh can z-fight anymore.
-            Navigation: STATIC tilted rotation (-78°, see NAV_TILT), no animation
-            — no wobble/flip. Info: upright + nod animation. */}
+            Tilted arrow: STATIC tilted rotation (-78°, see NAV_TILT), no animation.
+            Door: STATIC upright. Info: upright + nod animation. */}
         <a-image
           hotspot-layer="order: 1"
           src={faceTexture}
           width="1.05"
           height="1.05"
           material="shader: flat; side: double; transparent: true; alphaTest: 0.02"
-          {...(isArrow
+          {...(isTiltedArrow
             ? { rotation: flatRotation }
+            : isDoor
+            ? { rotation: '0 0 0' }
             : {
                 animation__tilt:
                   'property: rotation; from: -16 0 0; to: 16 0 0; dir: alternate; loop: true; dur: 2200; easing: easeInOutSine',
@@ -242,7 +309,7 @@ export default function HotspotLayer({
   onInfo,
 }: {
   hotspots: Hotspot[];
-  onNavigate: (targetSceneId: string) => void;
+  onNavigate: (targetSceneId: string, transitionUrl?: string) => void;
   onInfo: (collectionId: string) => void;
 }) {
   return (
@@ -253,7 +320,7 @@ export default function HotspotLayer({
           hotspot={hotspot}
           onActivate={() =>
             hotspot.type === 'navigation'
-              ? onNavigate(hotspot.target_scene_id)
+              ? onNavigate(hotspot.target_scene_id, hotspot.transition_url)
               : onInfo(hotspot.collection_id)
           }
         />
