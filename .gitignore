@@ -31,6 +31,9 @@ yarn-error.log*
 .vscode/
 .idea/
 
+# TypeScript incremental build cache (local, regenerates on every `tsc` run)
+tsconfig.tsbuildinfo
+
 # Aset 360° resolusi tinggi — JANGAN commit ke Git (pakai storage server).
 # Folder & README tetap di-track; file gambarnya diabaikan.
 /public/panorama/*

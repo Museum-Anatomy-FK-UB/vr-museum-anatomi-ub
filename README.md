@@ -4,7 +4,7 @@
 
 This app lets users explore every room of the FK UB Anatomy Museum virtually through the browser, anytime and anywhere, without visiting the physical location. Interactive hotspots surface anatomy collection information pulled dynamically from the ecosystem's centralized database.
 
-> **Status:** In development — an interactive proof-of-concept is built (mock-data driven); pending the real backend API and production assets.
+> **Status:** In development — now consuming the real backend API (Laravel); pending production 360° photo/collection assets from FK.
 > **PIC:** Anak Agung Ngurah Aditya Wirayudha
 > **Part of:** [Digital Ecosystem of the FK UB Anatomy Museum](https://museumanatomi.ub.ac.id) — MGM Lab, FILKOM UB
 
@@ -89,10 +89,7 @@ npm run dev
 # .env.local
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api    # Backend API URL (local)
 NEXT_PUBLIC_STORAGE_URL=http://localhost:8000/storage # File storage URL
-NEXT_PUBLIC_USE_MOCK=true                             # Use local mock data (lib/mock)
 ```
-
-While `NEXT_PUBLIC_USE_MOCK=true` (or `NEXT_PUBLIC_API_BASE_URL` is empty), the app serves data from `lib/mock/` instead of the backend. Set it to `false` once the API is live.
 
 ---
 

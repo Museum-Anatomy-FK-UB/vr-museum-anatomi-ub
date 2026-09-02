@@ -4,7 +4,10 @@ Draft of the endpoints the Web VR needs. This document was written by the VR tea
 as a **proposal to the Backend team (Azkal / Akmal)** to be reviewed and
 implemented.
 
-> **Status:** Draft — not final, needs alignment with the Backend team.
+> **Status:** Implemented — the VR frontend now consumes this live (see
+> `NEXT_PUBLIC_API_BASE_URL`). One deviation from the original draft below:
+> the collection endpoint actually implemented is `GET /api/vr/collections/:id`
+> (not `/api/collections/:id` as first drafted) — updated below to match.
 
 ---
 
@@ -110,7 +113,7 @@ of the target room.
 
 ---
 
-## 3. `GET /api/collections/:id`
+## 3. `GET /api/vr/collections/:id`
 
 Returns the detail of a single collection item. Called when the user clicks an
 `info` hotspot. This data is the **same** as the one used by the Web Portal and
@@ -153,7 +156,7 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | string | yes | Stable slug, used in the URL (`/vr/:id`) |
+| `id` | string | yes | Stable slug, used in the URL (`/vr/:id`). The backend's actual primary key is a UUID with the slug in a separate `slug_name` field — the VR client remaps `id` to `slug_name` on receipt so URLs stay readable; either form works when querying the backend directly |
 | `title` | string | yes | Room name shown on cards & floor plan |
 | `thumbnail_url` | string (URL) | yes | Small image for landing cards, not the full 360° photo |
 | `order` | number | yes | Display order in the room list |
@@ -167,9 +170,10 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `id`, `title`, `thumbnail_url` | — | yes | Same as SceneSummary |
 | `order` | number | no | Accepted by the frontend type but **not read anywhere at the detail level** — only `SceneSummary.order` (from the list endpoint) is actually used, for the floor plan pin label |
 | `panorama_url` | string (URL) | yes | Full-resolution equirectangular 360° photo |
-| `initial_yaw` | number (-180 to 180) | yes | Camera's starting horizontal angle when the room loads |
+| `initial_yaw` | number (-180 to 180) | yes | Camera's starting horizontal angle when the room loads — set this so the visitor arrives facing the interesting content/next hotspot, not a blank wall or the way they came from |
 | `initial_pitch` | number (-90 to 90) | yes (per current frontend type) | **Not read by any current rendering logic** — camera always starts level regardless of this value. Reserved for a future vertical-start-angle feature; safe to always send `0` |
 | `hotspots` | array | yes | Can be empty `[]` |
+| `horizon_roll` | number (degrees), optional | no | **Proposed addition, not yet implemented by backend** — see "Proposed additions" below |
 
 ### Hotspot
 
@@ -181,10 +185,12 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `pitch` | number (-90 to 90) | yes | |
 | `label` | string | yes | Shown as a text caption above the hotspot |
 | `arrow` | `"up"` \| `"down"` \| `"left"` \| `"right"` | no | Navigation only (ignored for `info`); defaults to `up` if omitted |
+| `variant` | `"arrow"` \| `"door"` | no | Navigation only. `door` = upright, camera-facing coin for an entrance/door; `arrow` (default) = tilted floor-marker. See **Proposed Additions** |
+| `arrow_deg` | number (0–360) | no | Navigation only. Free arrow rotation in degrees; overrides `arrow` when set. See **Proposed Additions** |
 | `target_scene_id` | string | required if `type: navigation` | Must match an existing `Scene.id` — see referential integrity note below |
 | `collection_id` | string | required if `type: info` | Must match an existing `Collection.id` |
 
-### Collection (`GET /api/collections/:id`)
+### Collection (`GET /api/vr/collections/:id`)
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
@@ -197,6 +203,63 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `audio_url` | string (URL) or `null` | no | Voice-over narration |
 | `video_url` | string (URL) or `null` | no | Accepted by the frontend type but **there is no video player in the UI yet** — reserved for a future feature, safe to always send `null` for now |
 | `portal_url` | string (URL) | no | Link to the matching Web Portal page |
+
+---
+
+## Proposed Additions (2026-08-06, not yet implemented by backend)
+
+Found while walking the real photos locally (`/dev/calibrate` — see that tool's
+comments). All are optional/additive — omitting any is safe and falls back to
+current behavior (no roll correction, tilted 4-way arrows, no transition frame).
+
+### `Scene.horizon_roll` (number, degrees, optional)
+
+Some of the raw 360° photos have a slight camera roll baked in from capture
+(horizon not level) — most are fine, but not all, seemingly inconsistent
+horizon-leveling at capture/export time. Rather than re-shooting/re-exporting
+every affected photo, the frontend can compensate at render time if the
+backend stores a manual correction angle per room, found empirically (drag a
+slider in `/dev/calibrate` until the horizon looks level, then save that
+number).
+
+- Column: `vr_rooms.horizon_roll` — `decimal(5,2)`, nullable, default `0`.
+- Expose in `VrSceneDetailResource` alongside `initial_yaw`/`initial_pitch`.
+- Frontend applies it as an extra Z-axis rotation on the panorama sphere,
+  same mechanism as `initial_yaw`'s Y-axis rotation — see
+  `components/vr/skyCrossfade.ts`.
+
+### `Hotspot.variant` (`"arrow"` | `"door"`, optional, navigation only)
+
+Visual style of a navigation hotspot:
+- `arrow` (default) — a tilted coin that lies down like a floor marker, for
+  general room-to-room movement.
+- `door` — an **upright** coin facing the camera (like an info hotspot) with a
+  door icon, for an entrance the visitor walks through.
+
+Used for entrances such as Lobby ↔ Ruang 1 and Ruang 17 → restricted-18.
+
+- Column: `vr_hotspots.variant` — string/enum `arrow`|`door`, nullable, default `arrow`.
+- Expose in `VrSceneDetailResource.hotspots[]`.
+- Frontend renders it in `components/vr/HotspotLayer.tsx`.
+
+### `Hotspot.arrow_deg` (number 0–360, optional, navigation only)
+
+Free rotation of the arrow icon (in degrees), so a navigation arrow can point
+any direction — not just the 4 cardinal `arrow` values. When set, it **overrides**
+`arrow`. `0` points forward/away (toward the destination), increasing clockwise.
+Ignored for the `door` variant. Captured with the slider in `/dev/calibrate`.
+
+- Column: `vr_hotspots.arrow_deg` — `decimal(6,2)` (or int), nullable.
+- Expose in `VrSceneDetailResource.hotspots[]`.
+
+### `Hotspot.transition_url` (string URL, optional, navigation only)
+
+Lets a navigation hotspot show a one-off image (e.g. a door opening) in place
+before crossfading to the target room, instead of navigating instantly.
+Currently only used for the Lobby → Ruang 1 entrance. If this is useful
+elsewhere, it'd need a `vr_hotspots.transition_url` column (nullable); for now
+it's handled as frontend-only data (`lib/localPreviewData.ts`) since it's a
+single case — raise it with the backend team only if more rooms need it.
 
 ---
 
@@ -269,9 +332,8 @@ That editing UI is out of scope for this repo; the VR team just needs to know:
    `id` in the collection table used by the Web Portal and Multimedia. There must
    not be a separate collection table just for VR.
 
-4. **Parallel development** — Until these endpoints are ready, the VR team uses
-   local mock data in `lib/mock/`. Once the endpoints are live, we just switch
-   `NEXT_PUBLIC_API_BASE_URL` and the functions in `lib/api.ts`.
+4. **Parallel development** — Done. The VR frontend has switched to the live
+   API via `NEXT_PUBLIC_API_BASE_URL`; the local mock layer has been removed.
 
 5. **Error handling** — Please be consistent: use the correct HTTP status codes
    for error responses (404 for scene/collection not found, 500 for server
