@@ -126,8 +126,10 @@ Inside the headset:
 | No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
 
 Info/photo hotspots open a panel **inside VR** (HTML modals are invisible in a
-headset). The restricted-area login and external links can't be used inside
-VR — the visitor is offered to leave VR for them.
+headset). The restricted-area login also works inside VR: a virtual keyboard
+is typed on with the laser (trigger) or a pinch — a paired Bluetooth keyboard
+works too — and it uses the same backend login as the website form. External
+links can't open inside VR, so the visitor is offered to leave VR for them.
 
 Testing without a headset: the [Immersive Web Emulator](https://chromewebstore.google.com/detail/immersive-web-emulator/cgffilbpcibhmcfbgggfhfolhkfbhmik)
 browser extension (by Meta) emulates a Quest, including controllers and hands.

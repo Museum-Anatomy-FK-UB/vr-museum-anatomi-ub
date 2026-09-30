@@ -19,7 +19,7 @@ import { registerSkyCrossfade } from './skyCrossfade';
 import { registerScrollZoom } from './scrollZoom';
 import { registerLittlePlanetIntro } from './littlePlanetIntro';
 import { registerXrPointer } from './xrPointer';
-import { registerVrLayer, VRInfoPanel, VRNoticePanel, VRPhotoPanel, type VRNoticeAction } from './VRPanels';
+import { registerVrLayer, VRInfoPanel, VRLoginPanel, VRNoticePanel, VRPhotoPanel, type VRNoticeAction } from './VRPanels';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -54,11 +54,9 @@ async function vrUnavailableReason(): Promise<string | null> {
   return 'Headset VR tidak terdeteksi. Buka alamat ini di browser headset VR (mis. Meta Quest Browser) untuk masuk ke Mode VR.';
 }
 
-// Things a hotspot can ask for that can't happen inside the headset (a login
-// form, another website) — the visitor is offered to leave VR for them.
-type VRNotice =
-  | { kind: 'restricted'; sceneId: string }
-  | { kind: 'external'; hotspot: ExternalLinkHotspot };
+// Something a hotspot asks for that can't happen inside the headset (another
+// website) — the visitor is offered to leave VR for it.
+type VRNotice = { kind: 'external'; hotspot: ExternalLinkHotspot };
 
 // Rooms whose slug starts with "restricted-" require a login before entering,
 // both via the door hotspot AND via a direct URL. `isRestrictedScene` /
@@ -159,6 +157,10 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [pendingSceneId, setPendingSceneId] = useState<string | null>(null);
   const [inVR, setInVR] = useState(false);
   const [vrNotice, setVrNotice] = useState<VRNotice | null>(null);
+  // Restricted room the visitor is logging in for, from inside the headset.
+  const [vrLoginSceneId, setVrLoginSceneId] = useState<string | null>(null);
+  const vrLoginSceneIdRef = useRef<string | null>(null);
+  vrLoginSceneIdRef.current = vrLoginSceneId;
   // Small on-screen message (outside VR), optionally with a link to open.
   const [toast, setToast] = useState<{ message: string; href?: string; newTab?: boolean } | null>(null);
 
@@ -252,6 +254,13 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     const exit = () => {
       setInVR(false);
       setVrNotice(null);
+      // Leaving VR mid-login continues in the regular HTML form.
+      const loginSceneId = vrLoginSceneIdRef.current;
+      if (loginSceneId) {
+        setVrLoginSceneId(null);
+        setPendingSceneId(loginSceneId);
+        setLoginOpen(true);
+      }
     };
     sceneEl.addEventListener('enter-vr', enter);
     sceneEl.addEventListener('exit-vr', exit);
@@ -370,9 +379,9 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     if (transitioningRef.current || targetId === currentIdRef.current) return;
     // Restricted rooms require a login first (also blocks the door hotspot).
     if (isRestrictedScene(targetId) && !isRestrictedUnlocked()) {
-      // The login form is HTML — it can't be typed into inside the headset.
+      // The HTML login form is invisible inside the headset — log in there instead.
       if (isImmersive()) {
-        setVrNotice({ kind: 'restricted', sceneId: targetId });
+        setVrLoginSceneId(targetId);
         return;
       }
       setPendingSceneId(targetId);
@@ -404,6 +413,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setActiveCollectionId(null);
       setActivePhotoHotspot(null);
       setVrNotice(null);
+      setVrLoginSceneId(null);
 
       // Old hotspots shrink out (220ms)
       document.querySelectorAll('a-entity.hs-anim').forEach((el) => {
@@ -485,24 +495,6 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
 
   const vrNoticeContent = (notice: VRNotice): { title: string; message: string; actions: VRNoticeAction[] } => {
     const cancel: VRNoticeAction = { label: 'Batal', onClick: () => setVrNotice(null) };
-    if (notice.kind === 'restricted') {
-      return {
-        title: 'Area terbatas',
-        message: 'Ruangan ini memerlukan login. Keluar dari Mode VR untuk login, lalu masuk kembali ke Mode VR.',
-        actions: [
-          cancel,
-          {
-            label: 'Keluar VR & Login',
-            primary: true,
-            onClick: () =>
-              exitVRThen(() => {
-                setPendingSceneId(notice.sceneId);
-                setLoginOpen(true);
-              }),
-          },
-        ],
-      };
-    }
     const { hotspot } = notice;
     return {
       title: hotspot.label || 'Tautan eksternal',
@@ -692,7 +684,18 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         {/* In-headset panels (HTML modals are invisible during an XR session).
             At most one at a time; the most recent request wins. */}
         {inVR &&
-          (vrNotice ? (
+          (vrLoginSceneId ? (
+            <VRLoginPanel
+              key={vrLoginSceneId}
+              onCancel={() => setVrLoginSceneId(null)}
+              onSuccess={() => {
+                // login() has already stored the token + unlocked the area.
+                const target = vrLoginSceneId;
+                setVrLoginSceneId(null);
+                navigateTo(target);
+              }}
+            />
+          ) : vrNotice ? (
             <VRNoticePanel key={JSON.stringify(vrNotice)} {...vrNoticeContent(vrNotice)} />
           ) : activePhotoHotspot ? (
             <VRPhotoPanel

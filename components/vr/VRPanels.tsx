@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PhotoHotspot } from '@/lib/types/tour';
 import { useCollection } from '@/lib/hooks/useCollection';
+import { login } from '@/lib/api';
 
 // In-headset versions of the HTML overlays (HotspotInfo, HotspotPhotoModal, …).
 // An immersive WebXR session only shows the WebGL canvas — any HTML modal opened
@@ -195,12 +196,18 @@ function useEntityClick<T extends HTMLElement>(onClick?: () => void) {
   return ref;
 }
 
+type PanelPlacement = {
+  distance?: number; // meters in front of the visitor
+  drop?: number; // meters below eye level
+  tilt?: number; // degrees the panel leans back (like a lectern), for tall panels
+};
+
 /** Where to put a panel: straight ahead of wherever the visitor is looking (level). */
-function usePanelPose(distance = 2) {
+function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {}) {
   const [pose] = useState(() => {
     const THREE = (window as unknown as { AFRAME?: any }).AFRAME?.THREE;
     const cam = (document.querySelector('a-scene') as unknown as { camera?: any } | null)?.camera;
-    if (!THREE || !cam) return { position: `0 0 -${distance}`, rotation: '0 0 0' };
+    if (!THREE || !cam) return { position: `0 ${-drop} -${distance}`, rotation: `${-tilt} 0 0` };
     const pos = new THREE.Vector3();
     const dir = new THREE.Vector3();
     cam.getWorldPosition(pos);
@@ -211,15 +218,16 @@ function usePanelPose(distance = 2) {
     const p = pos.clone().addScaledVector(dir, distance);
     const yawDeg = (Math.atan2(-dir.x, -dir.z) * 180) / Math.PI;
     return {
-      position: `${p.x.toFixed(3)} ${(pos.y - 0.1).toFixed(3)} ${p.z.toFixed(3)}`,
-      rotation: `0 ${yawDeg.toFixed(2)} 0`,
+      position: `${p.x.toFixed(3)} ${(pos.y - drop).toFixed(3)} ${p.z.toFixed(3)}`,
+      // A-Frame applies rotation in YXZ order: face the visitor, then lean back.
+      rotation: `${-tilt} ${yawDeg.toFixed(2)} 0`,
     };
   });
   return pose;
 }
 
-function PanelRoot({ children }: { children: React.ReactNode }) {
-  const pose = usePanelPose();
+function PanelRoot({ children, placement }: { children: React.ReactNode; placement?: PanelPlacement }) {
+  const pose = usePanelPose(placement);
   return (
     <a-entity position={pose.position} rotation={pose.rotation}>
       {children}
@@ -243,44 +251,71 @@ function CardPlane({ src, width, height, x = 0, y = 0 }: { src: string; width: n
   );
 }
 
+type ButtonVariant = 'default' | 'primary' | 'active';
+
+// Button faces are cached per look — the keyboard re-labels its keys on Shift,
+// and swapping back to an already-drawn face must not redraw a canvas.
+const buttonTextures = new Map<string, string>();
+function buttonTexture(label: string, width: number, height: number, variant: ButtonVariant): string {
+  const key = `${label}|${width}|${height}|${variant}`;
+  const cached = buttonTextures.get(key);
+  if (cached) return cached;
+  const { canvas, ctx } = newCanvas(width, height);
+  const w = canvas.width;
+  const h = canvas.height;
+  const primary = variant === 'primary';
+  const active = variant === 'active';
+  roundRect(ctx, 3, 3, w - 6, h - 6, Math.min((h - 6) / 2, 22));
+  ctx.fillStyle = primary ? '#fbbf24' : active ? 'rgba(251, 191, 36, 0.28)' : 'rgba(255, 255, 255, 0.12)';
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = primary || active ? '#fcd34d' : 'rgba(255, 255, 255, 0.35)';
+  ctx.stroke();
+  // Shrink the label until it fits (e.g. "Sembunyikan" on a narrow button).
+  let size = Math.round(h * 0.42);
+  ctx.font = `700 ${size}px ${FONT}`;
+  while (size > 12 && ctx.measureText(label).width > w - 28) {
+    size -= 1;
+    ctx.font = `700 ${size}px ${FONT}`;
+  }
+  ctx.fillStyle = primary ? '#0a1226' : '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, w / 2, h / 2 + 1);
+  const url = canvas.toDataURL('image/png');
+  buttonTextures.set(key, url);
+  return url;
+}
+
 function VRButton({
   label,
   x,
   y,
   width = 0.42,
+  height = 0.12,
   primary = false,
+  active = false,
+  name,
   onClick,
 }: {
   label: string;
   x: number;
   y: number;
   width?: number;
+  height?: number;
   primary?: boolean;
+  active?: boolean;
+  name?: string; // stable identifier (data-name), e.g. for tests
   onClick: () => void;
 }) {
   const ref = useEntityClick<HTMLElement>(onClick);
-  const height = 0.12;
-  const [src] = useState(() => {
-    const { canvas, ctx } = newCanvas(width, height);
-    const w = canvas.width;
-    const h = canvas.height;
-    roundRect(ctx, 3, 3, w - 6, h - 6, (h - 6) / 2);
-    ctx.fillStyle = primary ? '#fbbf24' : 'rgba(255, 255, 255, 0.12)';
-    ctx.fill();
-    ctx.lineWidth = 3;
-    ctx.strokeStyle = primary ? '#fcd34d' : 'rgba(255, 255, 255, 0.35)';
-    ctx.stroke();
-    ctx.font = `700 ${Math.round(h * 0.42)}px ${FONT}`;
-    ctx.fillStyle = primary ? '#0a1226' : '#ffffff';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, w / 2, h / 2 + 1);
-    return canvas.toDataURL('image/png');
-  });
+  const variant: ButtonVariant = primary ? 'primary' : active ? 'active' : 'default';
+  const src = useMemo(() => buttonTexture(label, width, height, variant), [label, width, height, variant]);
   return (
     <a-plane
       ref={ref}
       class="clickable"
+      data-name={name ?? label}
       vr-layer="order: 2"
       position={`${x} ${y} 0.01`}
       width={width}
@@ -545,6 +580,339 @@ export function VRNoticePanel({ title, message, actions }: { title: string; mess
           onClick={a.onClick}
         />
       ))}
+    </PanelRoot>
+  );
+}
+
+// ---- Restricted-area login ------------------------------------------------------
+// A form that works INSIDE the headset: HTML inputs are invisible in an immersive
+// session and the Quest's system keyboard doesn't open there, so the visitor
+// types on a virtual keyboard with the laser (trigger) or a pinch. A paired
+// Bluetooth keyboard works too. Uses the same login() as the HTML form, so the
+// token/unlock state ends up exactly as after a normal login.
+
+/**
+ * A plane whose texture is a canvas redrawn IN PLACE whenever `version` changes.
+ * (A new data-URL `src` per keystroke would leave every decoded image in
+ * A-Frame's texture-source cache for good — megabytes per key press.)
+ */
+function CanvasPlane({
+  width,
+  height,
+  version,
+  draw,
+}: {
+  width: number;
+  height: number;
+  version: string;
+  draw: (ctx: CanvasRenderingContext2D, w: number, h: number) => void;
+}) {
+  const ref = useRef<HTMLElement>(null);
+  const store = useRef<{ canvas: HTMLCanvasElement; texture: any } | null>(null);
+
+  useEffect(() => {
+    const el = ref.current as any;
+    const THREE = (window as unknown as { AFRAME?: any }).AFRAME?.THREE;
+    if (!el || !THREE) return;
+    const { canvas } = newCanvas(width, height);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    store.current = { canvas, texture };
+    const attach = () => {
+      const mesh = el.getObject3D('mesh');
+      if (!mesh?.material || mesh.material.map === texture) return;
+      mesh.material.map = texture;
+      mesh.material.needsUpdate = true;
+    };
+    attach();
+    el.addEventListener('loaded', attach);
+    el.addEventListener('object3dset', attach);
+    return () => {
+      el.removeEventListener('loaded', attach);
+      el.removeEventListener('object3dset', attach);
+      texture.dispose();
+      store.current = null;
+    };
+  }, [width, height]);
+
+  useEffect(() => {
+    const s = store.current;
+    if (!s) return;
+    const ctx = s.canvas.getContext('2d')!;
+    ctx.clearRect(0, 0, s.canvas.width, s.canvas.height);
+    draw(ctx, s.canvas.width, s.canvas.height);
+    s.texture.needsUpdate = true;
+    // `version` stands for everything `draw` renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version, width, height]);
+
+  return (
+    <a-plane
+      ref={ref}
+      class="clickable"
+      vr-layer="order: 0"
+      width={width}
+      height={height}
+      material="shader: flat; transparent: true"
+    />
+  );
+}
+
+/** Invisible hit area (e.g. over a text field drawn on the card). */
+function HitArea({ x, y, width, height, name, onClick }: {
+  x: number; y: number; width: number; height: number; name: string; onClick: () => void;
+}) {
+  const ref = useEntityClick<HTMLElement>(onClick);
+  return (
+    <a-plane
+      ref={ref}
+      class="clickable"
+      data-name={name}
+      vr-layer="order: 1"
+      position={`${x} ${y} 0.005`}
+      width={width}
+      height={height}
+      material="shader: flat; transparent: true; opacity: 0"
+    />
+  );
+}
+
+type KeyDef = { label: string; value?: string; action?: 'shift' | 'backspace' | 'symbols' | 'letters'; w?: number };
+const chars = (s: string): KeyDef[] => Array.from(s).map((c) => ({ label: c }));
+const LETTER_ROWS: KeyDef[][] = [
+  chars('1234567890'),
+  chars('qwertyuiop'),
+  chars('asdfghjkl'),
+  [{ label: '⇧', action: 'shift', w: 1.6 }, ...chars('zxcvbnm'), { label: '⌫', action: 'backspace', w: 1.6 }],
+  [
+    { label: '#+=', action: 'symbols', w: 1.6 },
+    ...chars('@.'),
+    { label: 'Spasi', value: ' ', w: 3 },
+    ...chars('-_'),
+    { label: '.com', value: '.com', w: 1.6 },
+  ],
+];
+const SYMBOL_ROWS: KeyDef[][] = [
+  chars('1234567890'),
+  chars('!@#$%^&*()'),
+  chars('-_+=/\\:;\'"'),
+  [...chars('[]{}<>,?'), { label: '⌫', action: 'backspace', w: 1.6 }],
+  [
+    { label: 'ABC', action: 'letters', w: 1.6 },
+    ...chars('~`'),
+    { label: 'Spasi', value: ' ', w: 3 },
+    ...chars('|.'),
+    { label: '.com', value: '.com', w: 1.6 },
+  ],
+];
+
+type LoginField = 'email' | 'password';
+
+export function VRLoginPanel({ onSuccess, onCancel }: { onSuccess: () => void; onCancel: () => void }) {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [focus, setFocus] = useState<LoginField>('email');
+  const [shift, setShift] = useState(false);
+  const [symbols, setSymbols] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Latest values for the keyboard/physical-key handlers (stable callbacks).
+  const live = useRef({ email, password, focus, shift, busy });
+  live.current = { email, password, focus, shift, busy };
+
+  const type = (text: string) => {
+    if (live.current.busy) return;
+    setError(null);
+    if (live.current.focus === 'email') setEmail((v) => (v + text).slice(0, 254));
+    else setPassword((v) => (v + text).slice(0, 128));
+  };
+  const backspace = () => {
+    if (live.current.busy) return;
+    if (live.current.focus === 'email') setEmail((v) => v.slice(0, -1));
+    else setPassword((v) => v.slice(0, -1));
+  };
+  const submit = () => {
+    const { email: e, password: p, busy: b } = live.current;
+    if (b) return;
+    if (!e.trim() || !p) {
+      setError('Isi email dan password terlebih dahulu.');
+      setFocus(!e.trim() ? 'email' : 'password');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    login(e.trim(), p)
+      .then(() => onSuccess())
+      .catch((err: unknown) => {
+        setError(err instanceof Error && err.message ? err.message : 'Login gagal. Coba lagi.');
+        setBusy(false);
+      });
+  };
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+
+  const pressKey = (k: KeyDef) => {
+    switch (k.action) {
+      case 'shift':
+        setShift((v) => !v);
+        return;
+      case 'backspace':
+        backspace();
+        return;
+      case 'symbols':
+        setSymbols(true);
+        return;
+      case 'letters':
+        setSymbols(false);
+        return;
+    }
+    const raw = k.value ?? k.label;
+    type(live.current.shift && raw.length === 1 ? raw.toUpperCase() : raw);
+    if (live.current.shift) setShift(false); // one-shot, like a phone keyboard
+  };
+
+  // A physical (e.g. Bluetooth) keyboard types into the focused field too.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === 'Enter') submitRef.current();
+      else if (e.key === 'Backspace') backspace();
+      else if (e.key === 'Tab') setFocus((f) => (f === 'email' ? 'password' : 'email'));
+      else if (e.key.length === 1) type(e.key);
+      else return;
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // type/backspace only touch refs and state setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---- Layout (meters, panel-local; y measured down from the top edge) ----
+  const W = 1.62;
+  const pad = 0.07;
+  const KW = 0.128; // one key unit
+  const KH = 0.105;
+  const GAP = 0.014;
+  const SHOW_W = 0.3; // "Tampilkan" button beside the password field
+  const T_TITLE = pad;
+  const T_EMAIL_LABEL = 0.165;
+  const T_EMAIL_BOX = 0.21;
+  const T_PASS_LABEL = 0.34;
+  const T_PASS_BOX = 0.385;
+  const BOX_H = 0.1;
+  const T_MESSAGE = 0.5;
+  const T_KEYS = 0.57;
+  const T_ACTIONS = T_KEYS + 5 * KH + 4 * GAP + 0.045;
+  const H = T_ACTIONS + 0.12 + pad;
+  const top = H / 2;
+  const yOf = (t: number, h: number) => top - t - h / 2; // center y of a box starting at t
+  const passBoxW = W - pad * 2 - SHOW_W - 0.02;
+
+  const shownPassword = showPassword ? password : '•'.repeat(password.length);
+  const version = JSON.stringify([email, shownPassword, focus, error, busy]);
+  const draw = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
+    const px = (m: number) => m * PX_PER_M;
+    drawCard(ctx, w, h);
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.font = `800 34px ${FONT}`;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('Login area terbatas', px(pad), px(T_TITLE));
+
+    const field = (label: string, value: string, t: number, boxW: number, focused: boolean, placeholder: string) => {
+      ctx.font = `600 20px ${FONT}`;
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText(label, px(pad), px(t - 0.045));
+      roundRect(ctx, px(pad), px(t), px(boxW), px(BOX_H), 14);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.07)';
+      ctx.fill();
+      ctx.lineWidth = focused ? 4 : 2;
+      ctx.strokeStyle = focused ? '#fbbf24' : 'rgba(255, 255, 255, 0.25)';
+      ctx.stroke();
+      const inner = px(boxW) - 36;
+      ctx.font = `400 28px ${FONT}`;
+      ctx.textBaseline = 'middle';
+      const cy = px(t + BOX_H / 2);
+      if (!value && !focused) {
+        ctx.fillStyle = '#64748b';
+        ctx.fillText(placeholder, px(pad) + 18, cy);
+      } else {
+        // Keep the END of long input visible (that's where typing happens).
+        let shown = value;
+        while (shown && ctx.measureText(`${shown}|`).width > inner) shown = shown.slice(1);
+        if (shown !== value) shown = `…${shown.slice(1)}`;
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(shown, px(pad) + 18, cy);
+        if (focused) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.fillRect(px(pad) + 20 + ctx.measureText(shown).width, cy - 16, 3, 32);
+        }
+      }
+      ctx.textBaseline = 'top';
+    };
+    field('Email', email, T_EMAIL_BOX, W - pad * 2, focus === 'email', 'nama@contoh.com');
+    field('Password', shownPassword, T_PASS_BOX, passBoxW, focus === 'password', 'Password');
+
+    ctx.font = `${error ? 600 : 400} 21px ${FONT}`;
+    ctx.fillStyle = error ? '#fca5a5' : '#94a3b8';
+    const message = busy
+      ? 'Memeriksa…'
+      : error ?? 'Arahkan laser ke tombol, lalu tekan trigger (atau pinch) untuk mengetik.';
+    const laid = layoutBlocks(ctx, [{ text: message, size: 21, color: ctx.fillStyle as string, lineHeight: 28, maxLines: 2, weight: error ? 600 : 400 }], px(W - pad * 2));
+    drawBlocks(ctx, laid, px(pad), px(T_MESSAGE));
+  };
+
+  const rows = symbols ? SYMBOL_ROWS : LETTER_ROWS;
+  const keyWidth = (k: KeyDef) => (k.w ?? 1) * KW + ((k.w ?? 1) - 1) * GAP;
+
+  return (
+    <PanelRoot placement={{ distance: 1.7, drop: 0.3, tilt: 18 }}>
+      <CanvasPlane width={W} height={H} version={version} draw={draw} />
+      <HitArea name="field-email" x={0} y={yOf(T_EMAIL_BOX, BOX_H)} width={W - pad * 2} height={BOX_H}
+        onClick={() => setFocus('email')} />
+      <HitArea name="field-password" x={-W / 2 + pad + passBoxW / 2} y={yOf(T_PASS_BOX, BOX_H)} width={passBoxW} height={BOX_H}
+        onClick={() => setFocus('password')} />
+      <VRButton
+        name="toggle-password"
+        label={showPassword ? 'Sembunyikan' : 'Tampilkan'}
+        x={W / 2 - pad - SHOW_W / 2}
+        y={yOf(T_PASS_BOX, BOX_H)}
+        width={SHOW_W}
+        height={BOX_H}
+        onClick={() => setShowPassword((v) => !v)}
+      />
+
+      {rows.map((row, r) => {
+        const rowW = row.reduce((sum, k) => sum + keyWidth(k), 0) + GAP * (row.length - 1);
+        let x = -rowW / 2;
+        return row.map((k, i) => {
+          const kw = keyWidth(k);
+          const cx = x + kw / 2;
+          x += kw + GAP;
+          const label = shift && !k.action && k.label.length === 1 ? k.label.toUpperCase() : k.label;
+          return (
+            <VRButton
+              // Keyed by position so switching layers re-labels instead of remounting.
+              key={`${r}-${i}`}
+              name={`key-${k.action ?? k.label}`}
+              label={label}
+              x={cx}
+              y={yOf(T_KEYS + r * (KH + GAP), KH)}
+              width={kw}
+              height={KH}
+              active={k.action === 'shift' && shift}
+              onClick={() => pressKey(k)}
+            />
+          );
+        });
+      })}
+
+      <VRButton name="cancel" label="Batal" x={-0.36} y={yOf(T_ACTIONS, 0.12)} width={0.56} onClick={onCancel} />
+      <VRButton name="submit" label={busy ? 'Memproses…' : 'Masuk'} x={0.36} y={yOf(T_ACTIONS, 0.12)} width={0.56} primary
+        onClick={submit} />
     </PanelRoot>
   );
 }
