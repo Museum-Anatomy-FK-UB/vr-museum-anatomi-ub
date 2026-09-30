@@ -1,7 +1,7 @@
 // VR Tour data types — derived directly from the contract in docs/API.md.
 // Do not change their shape without confirming with the Backend team (Azkal/Akmal).
 
-export type HotspotType = 'navigation' | 'info';
+export type HotspotType = 'navigation' | 'info' | 'photo' | 'external_link';
 
 /** Arrow direction for navigation hotspots (default 'up'). */
 export type HotspotArrow = 'up' | 'down' | 'left' | 'right';
@@ -60,7 +60,22 @@ export interface InfoHotspot extends BaseHotspot {
   collection_id: string;
 }
 
-export type Hotspot = NavHotspot | InfoHotspot;
+/** Hotspot that opens a single CMS-managed photo in a lightbox (no collection lookup). */
+export interface PhotoHotspot extends BaseHotspot {
+  type: 'photo';
+  media_url: string;
+  caption?: string;
+}
+
+/** Hotspot that opens an external URL (e.g. an outside article or reference). */
+export interface ExternalLinkHotspot extends BaseHotspot {
+  type: 'external_link';
+  url: string;
+  /** Backend defaults this to `true` (open in a new tab) when omitted. */
+  open_in_new_tab?: boolean;
+}
+
+export type Hotspot = NavHotspot | InfoHotspot | PhotoHotspot | ExternalLinkHotspot;
 
 /** Scene summary for the landing page (GET /api/vr/scenes) */
 export interface SceneSummary {

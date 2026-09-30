@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { Hotspot, HotspotArrow } from '@/lib/types/tour';
+import type { Hotspot, HotspotArrow, PhotoHotspot } from '@/lib/types/tour';
 
 // ---- Stable layering for the hotspot's flat, semi-transparent pieces -------
 // Hotspots sit ~6 units from the camera, all mutually near-coplanar, so their
@@ -93,7 +93,7 @@ const ARROW_DEG: Record<HotspotArrow, number> = { up: 0, right: -90, down: 180, 
  * texture on a single plane, no other mesh (besides the pulse ring) can "fight"
  * over the depth buffer.
  */
-function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door', arrowDeg = 0): string {
+function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door' | 'photo' | 'external_link', arrowDeg = 0): string {
   const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : `face-${kind}`;
   return cachedTexture(key, 256, (ctx, size) => {
     const cx = size / 2;
@@ -169,6 +169,71 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door', arrowDeg = 0): s
       ctx.beginPath();
       ctx.arc(x + w - w * 0.24, 0, w * 0.1, 0, Math.PI * 2);
       ctx.fill();
+    } else if (kind === 'photo') {
+      // Picture-frame glyph: rounded outline + a small sun/mountain silhouette,
+      // clipped to the frame — reads as "photo" at a glance.
+      const w = coinR * 0.66;
+      const h = coinR * 0.54;
+      const x = -w / 2;
+      const y = -h / 2;
+      const r = w * 0.14;
+      ctx.lineWidth = coinR * 0.09;
+      ctx.strokeStyle = '#f4f4f2';
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + w - r, y);
+      ctx.arcTo(x + w, y, x + w, y + r, r);
+      ctx.lineTo(x + w, y + h - r);
+      ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+      ctx.lineTo(x + r, y + h);
+      ctx.arcTo(x, y + h, x, y + h - r, r);
+      ctx.lineTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(x + w * 0.26, y + h * 0.32, w * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, w, h);
+      ctx.clip();
+      ctx.beginPath();
+      ctx.moveTo(x, y + h);
+      ctx.lineTo(x + w * 0.38, y + h * 0.45);
+      ctx.lineTo(x + w * 0.58, y + h * 0.68);
+      ctx.lineTo(x + w * 0.74, y + h * 0.42);
+      ctx.lineTo(x + w, y + h);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (kind === 'external_link') {
+      // External-link glyph: an open box + an arrow escaping the top-right corner.
+      const s = coinR * 0.5;
+      ctx.lineWidth = coinR * 0.09;
+      ctx.strokeStyle = '#f4f4f2';
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      ctx.beginPath();
+      ctx.moveTo(s * 0.15, -s * 0.6);
+      ctx.lineTo(-s * 0.75, -s * 0.6);
+      ctx.lineTo(-s * 0.75, s * 0.75);
+      ctx.lineTo(s * 0.75, s * 0.75);
+      ctx.lineTo(s * 0.75, -s * 0.05);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.05, -s * 0.85);
+      ctx.lineTo(s * 0.85, -s * 0.85);
+      ctx.lineTo(s * 0.85, s * 0.05);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(-s * 0.25, s * 0.05);
+      ctx.lineTo(s * 0.75, -s * 0.75);
+      ctx.stroke();
     } else {
       const dotR = coinR * 0.1;
       ctx.beginPath();
@@ -234,6 +299,10 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
     ? getHotspotFaceTexture('door')
     : isTiltedArrow
     ? getHotspotFaceTexture('arrow', arrowDeg)
+    : hotspot.type === 'photo'
+    ? getHotspotFaceTexture('photo')
+    : hotspot.type === 'external_link'
+    ? getHotspotFaceTexture('external_link')
     : getHotspotFaceTexture('info');
 
   // Tilted-arrow hotspots "lie down" like a floor marker (instead of floating
@@ -307,10 +376,12 @@ export default function HotspotLayer({
   hotspots,
   onNavigate,
   onInfo,
+  onPhoto,
 }: {
   hotspots: Hotspot[];
   onNavigate: (targetSceneId: string, transitionUrl?: string) => void;
   onInfo: (collectionId: string) => void;
+  onPhoto: (hotspot: PhotoHotspot) => void;
 }) {
   return (
     <>
@@ -318,11 +389,23 @@ export default function HotspotLayer({
         <HotspotEntity
           key={hotspot.id}
           hotspot={hotspot}
-          onActivate={() =>
-            hotspot.type === 'navigation'
-              ? onNavigate(hotspot.target_scene_id, hotspot.transition_url)
-              : onInfo(hotspot.collection_id)
-          }
+          onActivate={() => {
+            switch (hotspot.type) {
+              case 'navigation':
+                onNavigate(hotspot.target_scene_id, hotspot.transition_url);
+                break;
+              case 'info':
+                onInfo(hotspot.collection_id);
+                break;
+              case 'photo':
+                onPhoto(hotspot);
+                break;
+              case 'external_link':
+                // Fire-and-forget browser action — no shared state to lift up for this one.
+                window.open(hotspot.url, hotspot.open_in_new_tab === false ? '_self' : '_blank', 'noopener,noreferrer');
+                break;
+            }
+          }}
         />
       ))}
     </>

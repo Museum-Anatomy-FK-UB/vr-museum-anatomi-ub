@@ -99,15 +99,20 @@ function fromTourHotspot(h: Hotspot): EditorHotspot {
   if (h.type === 'info') {
     return { id: h.id, kind: 'info', yaw: h.yaw, pitch: h.pitch, label: h.label, collection_id: h.collection_id };
   }
-  return {
-    id: h.id,
-    kind: h.variant === 'door' ? 'door' : 'navigation',
-    yaw: h.yaw,
-    pitch: h.pitch,
-    label: h.label,
-    target: h.target_scene_id,
-    arrow_deg: h.arrow_deg,
-  };
+  if (h.type === 'navigation') {
+    return {
+      id: h.id,
+      kind: h.variant === 'door' ? 'door' : 'navigation',
+      yaw: h.yaw,
+      pitch: h.pitch,
+      label: h.label,
+      target: h.target_scene_id,
+      arrow_deg: h.arrow_deg,
+    };
+  }
+  // 'photo' / 'external_link' — CMS-managed backend types this dev editor doesn't
+  // create or edit. Shown as a plain marker rather than crashing on the mismatch.
+  return { id: h.id, kind: 'info', yaw: h.yaw, pitch: h.pitch, label: h.label, collection_id: '' };
 }
 
 /** The bundled seed (lib/calibrationSeed.ts) as editor state — the default shown
@@ -300,7 +305,7 @@ export default function CalibrationTool() {
           <a-camera ref={cameraRef} position="0 0 0" look-controls="reverseMouseDrag: false" wasd-controls="enabled: false" />
 
           {/* LIVE hotspot preview — same renderer as the tour. */}
-          <HotspotLayer key={roomSlug} hotspots={previewHotspots} onNavigate={() => {}} onInfo={() => {}} />
+          <HotspotLayer key={roomSlug} hotspots={previewHotspots} onNavigate={() => {}} onInfo={() => {}} onPhoto={() => {}} />
 
           {/* Selection halo around the hotspot currently being edited. */}
           {selected && (
