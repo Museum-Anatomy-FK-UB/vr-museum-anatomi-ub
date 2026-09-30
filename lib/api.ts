@@ -16,30 +16,83 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
  */
 const LOCAL_PREVIEW = process.env.NEXT_PUBLIC_LOCAL_PREVIEW === 'true';
 
+// --- Restricted-area auth (Sanctum bearer token) ----------------------------
+// The backend's `AuthenticateRestrictedVrRoom` middleware requires a valid
+// Sanctum token on `GET /vr/scenes/{id}` whenever that room's `is_restricted`
+// is true; anonymous requests get a 401. This is the ONE place that owns that
+// session state (unlock flag + token) so the gate (VRScene) and the fetch layer
+// (below) always agree. Session-only: a fresh tab/browser needs to log in again.
+const AUTH_TOKEN_KEY = 'vr-auth-token';
+const RESTRICTED_UNLOCKED_KEY = 'vr-restricted-unlocked';
+
+export const isRestrictedScene = (id: string): boolean => id.startsWith('restricted-');
+
+export function isRestrictedUnlocked(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.sessionStorage.getItem(RESTRICTED_UNLOCKED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(AUTH_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Marks the restricted area unlocked for this session and stores the Sanctum
+ *  token (preview mode has none — there's nothing real to send). */
+function markRestrictedUnlocked(token: string | null): void {
+  try {
+    window.sessionStorage.setItem(RESTRICTED_UNLOCKED_KEY, '1');
+    if (token) window.sessionStorage.setItem(AUTH_TOKEN_KEY, token);
+  } catch {
+    // best-effort
+  }
+}
+
+/** Clears the unlock + token — used when the backend rejects the token (401),
+ *  so the visitor is asked to log in again instead of staying "unlocked" with
+ *  a token that no longer works (expired/revoked). */
+export function clearRestrictedAuth(): void {
+  try {
+    window.sessionStorage.removeItem(RESTRICTED_UNLOCKED_KEY);
+    window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  } catch {
+    // best-effort
+  }
+}
+
+function authHeaders(): HeadersInit {
+  const token = getAuthToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /** Extract `data` from a `{ data: ... }` response per the docs/API.md contract. */
 async function request<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`);
+  const res = await fetch(`${BASE_URL}${path}`, {
+    headers: { Accept: 'application/json', ...authHeaders() },
+  });
   if (!res.ok) {
+    if (res.status === 401) clearRestrictedAuth();
     throw new Error(`Failed to load ${path} (HTTP ${res.status})`);
   }
   const json = (await res.json()) as { data: T };
   return json.data;
 }
 
-/**
- * The backend's real primary key is a UUID; `slug_name` (e.g. "ruang-lobby")
- * is a separate human-readable field. Swap `id` for the slug here so the rest
- * of the app (URLs, floor plan, gallery) keeps working with pretty ids —
- * the backend's show() endpoints accept either form anyway.
- */
-function useSlugAsId<T extends { id: string; slug_name?: string }>(item: T): T {
-  return item.slug_name ? { ...item, id: item.slug_name } : item;
-}
+// The backend now always returns the slug as `id` directly (VrSceneSummaryResource /
+// VrSceneDetailResource / CollectionResource all do `'id' => $this->slug_name`), so
+// no client-side remapping is needed anymore — the response is used as-is.
 
 export async function getScenes(): Promise<SceneSummary[]> {
   if (LOCAL_PREVIEW) return previewSceneList;
-  const scenes = await request<SceneSummary[]>('/vr/scenes');
-  return scenes.map(useSlugAsId);
+  return request<SceneSummary[]>('/vr/scenes');
 }
 
 export async function getScene(sceneId: string): Promise<Scene> {
@@ -48,8 +101,7 @@ export async function getScene(sceneId: string): Promise<Scene> {
     if (!scene) throw new Error(`Scene "${sceneId}" not found (local preview)`);
     return scene;
   }
-  const scene = await request<Scene>(`/vr/scenes/${sceneId}`);
-  return useSlugAsId(scene);
+  return request<Scene>(`/vr/scenes/${sceneId}`);
 }
 
 export async function getCollection(id: string): Promise<Collection> {
@@ -58,18 +110,14 @@ export async function getCollection(id: string): Promise<Collection> {
     if (!collection) throw new Error(`Collection "${id}" not found (local preview)`);
     return collection;
   }
-  const collection = await request<Collection>(`/vr/collections/${id}`);
-  return useSlugAsId(collection);
+  return request<Collection>(`/vr/collections/${id}`);
 }
 
 /**
  * Authenticate for the restricted area. Posts to the backend's `/login`
- * (Laravel Sanctum). Resolves on success, throws with a message on failure.
- *
- * NOTE (security): this is only the FRONT-END gate. The restricted room's data
- * endpoint (`/api/vr/scenes/restricted-*`) is still public on the backend, so
- * real protection requires the backend to require a valid token there. See
- * docs/HANDOFF-BACKEND-VR-DATA.md.
+ * (Laravel Sanctum) and, on success, stores the bearer `token` it returns so
+ * later `GET /vr/scenes/restricted-*` requests can authenticate — that route
+ * requires it (see `AuthenticateRestrictedVrRoom` on the backend).
  */
 export async function login(email: string, password: string): Promise<void> {
   if (LOCAL_PREVIEW) {
@@ -80,6 +128,7 @@ export async function login(email: string, password: string): Promise<void> {
     if (!/.+@.+\..+/.test(email) || password.length < 4) {
       throw new Error('Email atau password tidak valid.');
     }
+    markRestrictedUnlocked(null);
     return;
   }
   const res = await fetch(`${BASE_URL}/login`, {
@@ -88,4 +137,7 @@ export async function login(email: string, password: string): Promise<void> {
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) throw new Error('Email atau password salah.');
+  const json = (await res.json()) as { token?: string };
+  if (!json.token) throw new Error('Login berhasil, tetapi server tidak mengirim token.');
+  markRestrictedUnlocked(json.token);
 }

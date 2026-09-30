@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { Scene, SceneSummary } from '@/lib/types/tour';
-import { getScene, getScenes } from '@/lib/api';
+import type { Hotspot, PhotoHotspot, Scene, SceneSummary } from '@/lib/types/tour';
+import { getScene, getScenes, isRestrictedScene, isRestrictedUnlocked } from '@/lib/api';
 import HotspotLayer, { registerHotspotLayer } from './HotspotLayer';
 import HotspotInfo from './HotspotInfo';
+import HotspotPhotoModal from './HotspotPhotoModal';
 import SceneControlsBar from './SceneControlsBar';
 import SceneGallery from './SceneGallery';
 import FloorplanMap from './FloorplanMap';
@@ -21,28 +22,11 @@ import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// --- Restricted-area gate --------------------------------------------------
 // Rooms whose slug starts with "restricted-" require a login before entering,
-// both via the door hotspot AND via a direct URL. The unlock is per browser
-// session. NOTE: this is a front-end gate only — real protection needs the
-// backend to require auth on the restricted room's data endpoint.
-const RESTRICTED_KEY = 'vr-restricted-unlocked';
-const isRestricted = (id: string) => id.startsWith('restricted-');
-function readUnlocked(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.sessionStorage.getItem(RESTRICTED_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-function writeUnlocked(): void {
-  try {
-    window.sessionStorage.setItem(RESTRICTED_KEY, '1');
-  } catch {
-    // best-effort
-  }
-}
+// both via the door hotspot AND via a direct URL. `isRestrictedScene` /
+// `isRestrictedUnlocked` live in lib/api.ts (same module that stores the
+// Sanctum token and attaches it to requests), so the gate here and the actual
+// fetch always agree on auth state.
 
 /**
  * A-Frame initializes an entity's components asynchronously, so right after React
@@ -104,6 +88,18 @@ function recenterLook(cam: HTMLElement, dur: number) {
   }, dur + 60);
 }
 
+// Default names the calibration editor gives new hotspots ("Hotspot 1", …) were
+// seeded into the backend as-is; they are not real captions, so don't show them.
+const isDefaultHotspotLabel = (label: string) => /^hotspot\s*\d+$/i.test(label.trim());
+
+// Info hotspots with no collection linked yet (backend sends collection_id: null)
+// would open an empty/failing panel, so they are hidden until the data exists.
+function presentableHotspots(hotspots: Hotspot[]): Hotspot[] {
+  return hotspots
+    .filter((h) => h.type !== 'info' || !!h.collection_id)
+    .map((h) => (isDefaultHotspotLabel(h.label) ? { ...h, label: '' } : h));
+}
+
 // PERSISTENT A-Frame scene: the a-scene is not torn down when switching rooms —
 // the panorama & hotspots are swapped in place while animated (zoom + fade) for a
 // smooth 3DVista-like transition. MUST be dynamically imported with ssr:false (A-Frame is anti-SSR).
@@ -115,6 +111,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [covered, setCovered] = useState(true); // initial black overlay (for the intro reveal)
   const [coverDuration, setCoverDuration] = useState(750);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
+  const [activePhotoHotspot, setActivePhotoHotspot] = useState<PhotoHotspot | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [floorplanOpen, setFloorplanOpen] = useState(false);
   const [hotspotsVisible, setHotspotsVisible] = useState(true);
@@ -134,6 +131,11 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const didIntroRef = useRef(false);
   const currentIdRef = useRef<string | null>(null);
   const activeSceneRef = useRef<Scene | null>(null);
+
+  const visibleHotspots = useMemo(
+    () => presentableHotspots(activeScene?.hotspots ?? []),
+    [activeScene],
+  );
 
   useEffect(() => {
     currentIdRef.current = activeScene?.id ?? null;
@@ -224,7 +226,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   useEffect(() => {
     if (!ready) return;
     let mounted = true;
-    if (isRestricted(initialSceneId) && !readUnlocked()) {
+    if (isRestrictedScene(initialSceneId) && !isRestrictedUnlocked()) {
       // Direct URL into a restricted room: block it and require login first.
       setPendingSceneId(initialSceneId);
       setLoginOpen(true);
@@ -306,7 +308,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const navigateTo = useCallback(async (targetId: string, transitionUrl?: string) => {
     if (transitioningRef.current || targetId === currentIdRef.current) return;
     // Restricted rooms require a login first (also blocks the door hotspot).
-    if (isRestricted(targetId) && !readUnlocked()) {
+    if (isRestrictedScene(targetId) && !isRestrictedUnlocked()) {
       setPendingSceneId(targetId);
       setLoginOpen(true);
       return;
@@ -334,6 +336,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       const next = await getScene(targetId);
 
       setActiveCollectionId(null);
+      setActivePhotoHotspot(null);
 
       // Old hotspots shrink out (220ms)
       document.querySelectorAll('a-entity.hs-anim').forEach((el) => {
@@ -384,9 +387,9 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     sceneEl?.enterVR?.();
   }, []);
 
-  // Restricted-area login handlers.
+  // Restricted-area login handlers. `login()` (lib/api.ts) already marks the
+  // session unlocked (+ stores the bearer token) before this fires.
   const onLoginSuccess = () => {
-    writeUnlocked();
     setLoginOpen(false);
     const target = pendingSceneId;
     setPendingSceneId(null);
@@ -519,9 +522,10 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         {hotspotsVisible && activeScene && !introPlaying && (
           <HotspotLayer
             key={activeScene.id}
-            hotspots={activeScene.hotspots}
+            hotspots={visibleHotspots}
             onNavigate={navigateTo}
             onInfo={setActiveCollectionId}
+            onPhoto={setActivePhotoHotspot}
           />
         )}
 
@@ -608,6 +612,10 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
 
       {activeScene && activeCollectionId && (
         <HotspotInfo collectionId={activeCollectionId} onClose={() => setActiveCollectionId(null)} />
+      )}
+
+      {activeScene && activePhotoHotspot && (
+        <HotspotPhotoModal hotspot={activePhotoHotspot} onClose={() => setActivePhotoHotspot(null)} />
       )}
 
       {/* Transition curtain — black fade when switching/entering rooms */}
