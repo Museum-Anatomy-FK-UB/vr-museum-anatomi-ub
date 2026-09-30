@@ -15,7 +15,7 @@ This app lets users explore every room of the FK UB Anatomy Museum virtually thr
 - Multi-room 360° virtual tour (Lobby, Basic Anatomy, Osteology, Internal Organs, Histology, Embryology)
 - Room-to-room navigation via hotspots and a museum floor plan / map
 - Collection info hotspots — photos, description, voice-over, and a link to the Web Portal
-- VR Mode (WebXR / Google Cardboard) via a toggle button
+- VR Mode (WebXR) for standalone headsets such as **Meta Quest** — see [VR headsets](#vr-headsets-meta-quest)
 - A unique URL per room (`/vr/osteologi`) — shareable and bookmarkable
 - All content managed from a centralized CMS, never hardcoded
 
@@ -104,6 +104,33 @@ npm run start
 ```
 
 Deployment to the UB server uses Nginx. Configuration details will follow once the server is ready.
+
+---
+
+## VR Headsets (Meta Quest)
+
+"Mode VR" starts an immersive WebXR session. It only works in a browser that
+has a VR headset behind it — e.g. the **Meta Quest Browser** on the headset
+itself (or a PC browser with Quest Link). On a normal laptop/phone browser the
+button explains that no headset was detected instead of entering VR.
+
+Requirements:
+- The site must be served over **HTTPS** (browsers only expose WebXR in a secure context; `localhost` also counts).
+- Collection photos and panoramas load into WebGL, so the storage server must send **CORS** headers (`Access-Control-Allow-Origin`) for them.
+
+Inside the headset:
+| Input | Point | Activate |
+|---|---|---|
+| Touch controllers | laser from the controller | trigger |
+| Hand tracking | laser from the hand | pinch |
+| No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
+
+Info/photo hotspots open a panel **inside VR** (HTML modals are invisible in a
+headset). The restricted-area login and external links can't be used inside
+VR — the visitor is offered to leave VR for them.
+
+Testing without a headset: the [Immersive Web Emulator](https://chromewebstore.google.com/detail/immersive-web-emulator/cgffilbpcibhmcfbgggfhfolhkfbhmik)
+browser extension (by Meta) emulates a Quest, including controllers and hands.
 
 ---
 

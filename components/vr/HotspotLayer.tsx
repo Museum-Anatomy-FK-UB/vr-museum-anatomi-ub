@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import type { Hotspot, HotspotArrow, PhotoHotspot } from '@/lib/types/tour';
+import type { ExternalLinkHotspot, Hotspot, HotspotArrow, PhotoHotspot } from '@/lib/types/tour';
 
 // ---- Stable layering for the hotspot's flat, semi-transparent pieces -------
 // Hotspots sit ~6 units from the camera, all mutually near-coplanar, so their
@@ -377,11 +377,13 @@ export default function HotspotLayer({
   onNavigate,
   onInfo,
   onPhoto,
+  onExternalLink,
 }: {
   hotspots: Hotspot[];
   onNavigate: (targetSceneId: string, transitionUrl?: string) => void;
   onInfo: (collectionId: string) => void;
   onPhoto: (hotspot: PhotoHotspot) => void;
+  onExternalLink: (hotspot: ExternalLinkHotspot) => void;
 }) {
   return (
     <>
@@ -401,8 +403,8 @@ export default function HotspotLayer({
                 onPhoto(hotspot);
                 break;
               case 'external_link':
-                // Fire-and-forget browser action — no shared state to lift up for this one.
-                window.open(hotspot.url, hotspot.open_in_new_tab === false ? '_self' : '_blank', 'noopener,noreferrer');
+                // Lifted up: inside a VR headset the link can't just open (see VRScene).
+                onExternalLink(hotspot);
                 break;
             }
           }}
