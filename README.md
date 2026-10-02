@@ -126,23 +126,25 @@ Inside the headset:
 | No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
 
 The menu (Main Location, All Location, Denah, Show/Hide Hotspot, Keluar VR —
-the same actions as the 2D footer bar) is **closed by default** so it never
-covers a hotspot: only a small **Menu** button sits low, ~60° below eye level
-(under the floor arrows). Open/close it with:
-| Input | How |
+the same actions as the 2D footer bar) is **closed by default**. A small
+**Menu** button floats just above the **left controller / left hand** (like a
+Quest wrist menu), so it is always within reach and never in front of a
+hotspot. Opening it shows the bar in front of the chest; it closes again after
+use and when you move to another room.
+| Input | Open / close the menu |
 |---|---|
-| Touch controllers | **B** or **Y** button — or laser + trigger on the Menu button |
-| Hand tracking | laser from the hand + **pinch** on the Menu button |
-| No controller/hand | look at the Menu button for 1s |
+| Touch controllers | **B** or **Y** — or right laser + trigger on the Menu button |
+| Hand tracking | **tap it with your right index finger** — or right-hand laser + pinch |
+| No controller/hand | look at the Menu button (floating low in front) for 1s |
 
-The menu only responds while you are **looking at it** (the Menu button lights
-up); the rest of the time lasers pass straight through it, so a controller held
-at the hip can always reach the floor arrows. It closes again when you move to
-another room, stays put while you look around and swings round only after you
-turn well away.
+Hands and controllers are drawn in VR: your tracked hands (like in the Quest
+home) or the Touch controller models. With hand tracking, menu, panel and
+keyboard buttons can be **touched directly with a fingertip** — like the Quest's
+own keyboard — and those panels open within arm's reach (scaled so they look the
+same size). The hand's laser steps aside while the finger is near a button.
 
-In the emulator's Play mode the lasers follow your view: look down at the Menu
-button until it lights up, then left-click — or press right Shift (B) / Z (Y).
+In the emulator's Play mode the controllers are fixed to your view, so use
+right Shift (B) / Z (Y) to open the menu.
 
 Arriving in a room, its intended view (`initial_yaw`) is placed **wherever you
 are facing** — the room (panorama and hotspots together) is turned to you, the

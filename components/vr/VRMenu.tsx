@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { SceneSummary } from '@/lib/types/tour';
 import {
   CardPlane,
@@ -19,18 +19,16 @@ import {
 // hotspots) live on a bar floating BELOW the visitor's line of sight. Fullscreen /
 // Mode VR make no sense inside VR, so that slot becomes "Keluar VR".
 //
-// Closed by default: only a small "Menu" button sits low (~62° down), under the
-// floor arrows (which lie ~20–49° down). It only catches lasers while the
-// visitor's gaze is on it (see vr-menu-follow), so a laser from a hand at the hip
-// to a floor arrow — which passes right through that spot — is never blocked.
-// It opens with that button (laser + trigger, hand + pinch, or gaze) or with
-// B / Y on a controller (see xr-pointer), and closes again on navigation.
+// Closed by default: only a small "Menu" button, floating just above the LEFT
+// controller / hand (like many Quest apps' wrist menus). Being attached to a hand
+// it is never between a laser and a hotspot, it's always right where you can
+// reach it, and it's clicked like anything else: right-hand laser + trigger, or
+// pinch. B / Y on a controller toggles it too (see xr-pointer). Opening it shows
+// the bar in front of the chest; it closes again after use and on navigation.
+// With nothing to point with (gaze only), the button floats low in front instead.
 // The open bar's background lets lasers through — only its buttons catch them.
 
-// ---- Lazy-follow placement --------------------------------------------------------
-// The bar stays put while the visitor looks around nearby, and only swings round
-// to their new heading once they've turned well away from it (like the Quest's own
-// menus). Following every small head turn would make it impossible to aim at.
+// ---- Placement --------------------------------------------------------------------
 export function registerVrMenuFollow() {
   const AFRAME = (window as unknown as { AFRAME?: any }).AFRAME;
   if (!AFRAME || AFRAME.components['vr-menu-follow']) return;
@@ -40,50 +38,86 @@ export function registerVrMenuFollow() {
 
   AFRAME.registerComponent('vr-menu-follow', {
     schema: {
-      distance: { default: 0.8 }, // meters from the eyes — within easy laser reach
-      pitch: { default: -62 }, // degrees below the line of sight (faces the eyes)
+      hand: { default: 'left' }, // preferred hand to ride on (the other one points)
+      lift: { default: 0.1 }, // meters above the controller / hand
+      handSmooth: { default: 45 }, // ms — just enough to steady hand-tracking jitter
+      // Fallback with no controller/hand (gaze only): floats low in front and
+      // lazily follows the heading, like the Quest's own menus.
+      distance: { default: 0.8 },
+      pitch: { default: -45 },
       threshold: { default: 40 }, // degrees of head turn before it follows
-      // The menu's own area (panel-local meters) — it takes the laser only while
-      // the visitor's GAZE falls inside it (plus a margin).
-      regionW: { default: 0.62 },
-      regionTop: { default: 0.08 },
-      regionBottom: { default: -0.08 },
-      margin: { default: 0.03 },
-      smooth: { default: 220 }, // ms time-constant of the follow motion
+      smooth: { default: 220 },
     },
     init(this: any) {
       this.yaw = null;
       this.turning = false;
+      this.mode = null; // 'hand' | 'float'
       this.head = new THREE.Vector3();
       this.target = new THREE.Vector3();
       this.quat = new THREE.Quaternion();
       this.euler = new THREE.Euler();
-      this.active = null;
-      this.inv = new THREE.Matrix4();
-      this.o = new THREE.Vector3();
-      this.d = new THREE.Vector3();
     },
+
+    /** World position of the preferred (else any) tracked controller/hand, or null. */
+    handPosition(this: any, out: any) {
+      const sceneEl = this.el.sceneEl;
+      const session = sceneEl.xrSession;
+      const frame = sceneEl.frame;
+      const ref = sceneEl.renderer?.xr?.getReferenceSpace?.();
+      if (!session || !frame || !ref) return null;
+      const sources = Array.from(session.inputSources as any[]).filter((s) => s.targetRayMode === 'tracked-pointer');
+      const source = sources.find((s) => s.handedness === this.data.hand) ?? sources[0];
+      if (!source) return null;
+      const pose = frame.getPose(source.gripSpace || source.targetRaySpace, ref);
+      if (!pose) return null;
+      const p = pose.transform.position;
+      out.set(p.x, p.y, p.z);
+      // XR poses are relative to the camera rig's parent — same as xr-pointer.
+      sceneEl.camera?.el?.object3D?.parent?.localToWorld(out);
+      this.rideHand = source.handedness;
+      return out;
+    },
+
     tick(this: any, _t: number, dt: number) {
       const cam = this.el.sceneEl.camera;
       if (!cam) return;
       cam.getWorldPosition(this.head);
+      const o = this.el.object3D;
+
+      // 1) Ride on a controller / hand.
+      const riding = this.handPosition(this.target);
+      // Tell xr-pointer which hand carries the button: that hand's own finger
+      // must not poke it by accident (only the other hand presses it).
+      const ride = riding ? this.rideHand : null;
+      if (ride !== this.lastRide) {
+        this.lastRide = ride;
+        if (ride) this.el.setAttribute('data-ride-hand', ride);
+        else this.el.removeAttribute('data-ride-hand');
+      }
+      if (riding) {
+        this.target.y += this.data.lift;
+        const alpha = this.mode === 'hand' ? 1 - Math.exp(-(dt || 16) / this.data.handSmooth) : 1;
+        o.position.lerp(this.target, alpha);
+        o.lookAt(this.head); // face the eyes
+        this.mode = 'hand';
+        this.yaw = null; // re-seed the fallback if the hands go away
+        return;
+      }
+
+      // 2) Nothing to point with: float low in front, lazily following the heading.
       const yawHead = headYaw(cam, THREE);
       const first = this.yaw === null;
       if (first) this.yaw = yawHead;
-
       const diff = wrap(yawHead - this.yaw);
-      // No meaningful heading while looking (nearly) straight up/down — don't
-      // start swinging the bar around on it.
       cam.getWorldQuaternion(this.quat);
+      // No meaningful heading while looking (nearly) straight up/down.
       const steep = Math.abs(this.euler.setFromQuaternion(this.quat, 'YXZ').x) > 70 * DEG;
-
       if (!steep && Math.abs(diff) > this.data.threshold * DEG) this.turning = true;
       const alpha = first ? 1 : 1 - Math.exp(-(dt || 16) / this.data.smooth);
       if (this.turning) {
         this.yaw = wrap(this.yaw + diff * alpha);
         if (Math.abs(diff) < 2 * DEG) this.turning = false;
       }
-
       const pitch = this.data.pitch * DEG;
       const ahead = Math.cos(pitch) * this.data.distance;
       this.target.set(
@@ -91,36 +125,10 @@ export function registerVrMenuFollow() {
         this.head.y + Math.sin(pitch) * this.data.distance,
         this.head.z - Math.cos(this.yaw) * ahead,
       );
-      const o = this.el.object3D;
-      if (first) o.position.copy(this.target);
+      if (first || this.mode !== 'float') o.position.copy(this.target);
       else o.position.lerp(this.target, alpha);
-      // Lean back by the same angle so the face points straight at the eyes
-      // (entity rotation order is YXZ).
-      o.rotation.set(pitch, this.yaw, 0);
-
-      // The menu sits low in front of the body — right across the path of a
-      // laser from a hand at the hip to a floor arrow. So it only catches lasers
-      // while the visitor is LOOKING AT it (gaze lands inside its area); while
-      // they look at / aim for hotspots, lasers pass straight through.
-      o.updateMatrixWorld(true);
-      this.inv.copy(o.matrixWorld).invert();
-      this.o.copy(this.head).applyMatrix4(this.inv);
-      cam.getWorldDirection(this.d);
-      this.d.add(this.head).applyMatrix4(this.inv).sub(this.o);
-      let active = false;
-      if (this.d.z < -1e-6 && this.o.z > 0) {
-        const t = -this.o.z / this.d.z;
-        const x = this.o.x + this.d.x * t;
-        const y = this.o.y + this.d.y * t;
-        const m = this.data.margin * (this.active ? 2 : 1); // hysteresis
-        active = Math.abs(x) < this.data.regionW / 2 + m && y > this.data.regionBottom - m && y < this.data.regionTop + m;
-      }
-      if (active !== this.active) {
-        this.active = active;
-        if (active) this.el.removeAttribute('data-ray-off');
-        else this.el.setAttribute('data-ray-off', '');
-        this.el.emit('vr-menu-active', { active }, false);
-      }
+      o.rotation.set(pitch, this.yaw, 0); // lean back to face the eyes (YXZ order)
+      this.mode = 'float';
     },
   });
 }
@@ -263,40 +271,39 @@ function pillTexture(icon: IconName, label: string, w: number, h: number, active
   return url;
 }
 
-// The clickable area is much bigger than the pill it shows: a small target this
-// low is hard to hit — with a controller held at the hip, and impossible in the
-// emulator's Play mode, whose two lasers run parallel to the view ~25cm either
-// side of center (they'd pass either side of a 20cm button). It's invisible, and
-// only catches lasers while the visitor is looking at the menu (vr-menu-follow).
-export const MENU_HIT_W = 0.62;
-export const MENU_HIT_H = 0.16;
-function MenuToggle({ open, active, w, h, onClick }: {
-  open: boolean; active: boolean; w: number; h: number; onClick: () => void;
-}) {
+// The clickable area is a little bigger than the pill it shows, so it's easy to
+// catch with a laser even while the hand it rides on moves a bit.
+export const MENU_HIT_W = 0.2;
+export const MENU_HIT_H = 0.075;
+export const MENU_HIT_D = 0.03;
+function MenuToggle({ open, w, h, onClick }: { open: boolean; w: number; h: number; onClick: () => void }) {
   const ref = useEntityClick<HTMLElement>(onClick);
   const src = useMemo(() => pillTexture(open ? 'close' : 'menu', open ? 'Tutup' : 'Menu', w, h, open), [open, w, h]);
   return (
-    <a-plane
+    // A shallow invisible BOX, not a flat plane: the button faces the eyes, so
+    // the other hand's laser often meets it nearly edge-on, where a flat plane
+    // is almost impossible to hit.
+    <a-box
       ref={ref}
       class="clickable"
       data-name="menu-toggle"
       vr-layer="order: 3"
       width={MENU_HIT_W}
       height={MENU_HIT_H}
+      depth={MENU_HIT_D}
       material="shader: flat; transparent: true; opacity: 0"
-      animation__enter="property: scale; startEvents: mouseenter; to: 1.1 1.1 1.1; dur: 120; easing: easeOutQuad"
+      animation__enter="property: scale; startEvents: mouseenter; to: 1.15 1.15 1.15; dur: 120; easing: easeOutQuad"
       animation__leave="property: scale; startEvents: mouseleave; to: 1 1 1; dur: 120; easing: easeOutQuad"
     >
       <a-plane
         vr-layer="order: 4"
-        position="0 0 0.002"
+        position={`0 0 ${MENU_HIT_D / 2 + 0.001}`}
         width={w}
         height={h}
         src={src}
-        // Dimmed while lasers pass through it (not looking down at it).
-        material={`shader: flat; transparent: true; opacity: ${active ? 1 : 0.55}`}
+        material="shader: flat; transparent: true"
       />
-    </a-plane>
+    </a-box>
   );
 }
 
@@ -349,47 +356,36 @@ export function VRMenuBar({
     ctx.stroke();
     return canvas.toDataURL('image/png');
   });
-  const PILL_W = 0.24;
-  const PILL_H = 0.075;
-  const followRef = useRef<HTMLElement>(null);
-  const [active, setActive] = useState(false);
-  useEffect(() => {
-    const el = followRef.current;
-    if (!el) return;
-    const onActive = (e: Event) => setActive(!!(e as CustomEvent).detail?.active);
-    el.addEventListener('vr-menu-active', onActive);
-    return () => el.removeEventListener('vr-menu-active', onActive);
-  }, []);
+  const PILL_W = 0.15;
+  const PILL_H = 0.05;
   return (
-    <a-entity
-      ref={followRef}
-      // Its area grows to include the bar while the menu is open.
-      vr-menu-follow={`regionW: ${expanded ? Math.max(W, MENU_HIT_W) : MENU_HIT_W}; regionBottom: ${-MENU_HIT_H / 2}; regionTop: ${
-        expanded ? MENU_HIT_H / 2 + 0.01 + H : MENU_HIT_H / 2
-      }`}
-      data-ray-off=""
-    >
-      <MenuToggle open={expanded} active={active} w={PILL_W} h={PILL_H} onClick={onToggleMenu} />
+    <>
+      <a-entity vr-menu-follow="">
+        <MenuToggle open={expanded} w={PILL_W} h={PILL_H} onClick={onToggleMenu} />
+      </a-entity>
       {expanded && (
-        // Opens just above the Menu button's (invisible, larger) hit area.
-        <a-entity position={`0 ${MENU_HIT_H / 2 + 0.01 + H / 2} 0`}>
-          <CardPlane src={bg} width={W} height={H} blocking={false} />
-          {items.map((it, i) => (
-            <IconButton
-              key={it.name}
-              name={it.name}
-              icon={it.icon}
-              label={it.label}
-              x={-W / 2 + PAD + BW / 2 + i * (BW + GAP)}
-              w={BW}
-              h={BH}
-              active={!!it.active}
-              onClick={it.onClick}
-            />
-          ))}
-        </a-entity>
+        // In front of the chest, where it opened — comfortably below eye level
+        // and within easy reach of either hand's laser.
+        <PanelRoot placement={{ distance: 0.9, drop: 0.35, tilt: 20 }}>
+          <a-entity data-name="menu-bar">
+            <CardPlane src={bg} width={W} height={H} blocking={false} />
+            {items.map((it, i) => (
+              <IconButton
+                key={it.name}
+                name={it.name}
+                icon={it.icon}
+                label={it.label}
+                x={-W / 2 + PAD + BW / 2 + i * (BW + GAP)}
+                w={BW}
+                h={BH}
+                active={!!it.active}
+                onClick={it.onClick}
+              />
+            ))}
+          </a-entity>
+        </PanelRoot>
       )}
-    </a-entity>
+    </>
   );
 }
 

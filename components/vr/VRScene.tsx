@@ -18,7 +18,7 @@ import { registerSmoothDragLook } from './smoothDragLook';
 import { registerSkyCrossfade } from './skyCrossfade';
 import { registerScrollZoom } from './scrollZoom';
 import { registerLittlePlanetIntro } from './littlePlanetIntro';
-import { registerXrPointer } from './xrPointer';
+import { registerVrHandStyle, registerXrPointer } from './xrPointer';
 import {
   headYaw,
   registerVrLayer,
@@ -237,6 +237,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerXrPointer();
       registerVrLayer();
       registerVrMenuFollow();
+      registerVrHandStyle();
       if (mounted) setReady(true);
     });
     return () => {
@@ -764,10 +765,15 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
 
         {/* Controller/hand lasers + trigger/pinch clicks inside an XR session. */}
         <a-entity xr-pointer="reticle: #vr-gaze-reticle" />
-        {/* Quest Touch controller models — visual only (shown while a controller
-            is connected); all clicking goes through xr-pointer above. */}
-        <a-entity meta-touch-controls="hand: left" />
-        <a-entity meta-touch-controls="hand: right" />
+        {/* What the visitor holds, drawn in VR — visual only, all clicking goes
+            through xr-pointer above. Quest Touch controller models while
+            controllers are in use; the visitor's own tracked hands (like in the
+            Quest home) while using hand tracking. Each shows only while that
+            kind of input is active. */}
+        <a-entity meta-touch-controls="hand: left" vr-hand-style="" />
+        <a-entity meta-touch-controls="hand: right" vr-hand-style="" />
+        <a-entity hand-tracking-controls="hand: left; modelColor: #e8eefc; modelOpacity: 0.9" vr-hand-style="" />
+        <a-entity hand-tracking-controls="hand: right; modelColor: #e8eefc; modelOpacity: 0.9" vr-hand-style="" />
 
         {/* In-headset panels (HTML modals are invisible during an XR session).
             At most one at a time; the most recent request wins. */}
@@ -819,9 +825,9 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
             />
           ) : null)}
 
-        {/* The footer bar's actions, low below the line of sight: a small "Menu"
-            button that opens the bar (or B / Y). Hidden while the login keyboard
-            is up — it would sit right in front of it. */}
+        {/* The footer bar's actions: a small "Menu" button riding on the left
+            controller / hand opens the bar in front of the chest (or B / Y).
+            Hidden while the login keyboard is up. */}
         {inVR && !vrLoginSceneId && (
           <VRMenuBar
             expanded={vrMenuOpen}
@@ -831,15 +837,19 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
             onMainLocation={() => {
               if (mainSceneId) navigateTo(mainSceneId);
             }}
+            // The bar gets out of the way once a panel opens (it would sit
+            // right under it); Show/Hide Hotspot keeps it so the effect is seen.
             onAllLocations={() => {
               const opening = !galleryOpen;
               closeVrPanels();
               setGalleryOpen(opening);
+              setVrMenuOpen(false);
             }}
             onFloorplan={() => {
               const opening = !floorplanOpen;
               closeVrPanels();
               setFloorplanOpen(opening);
+              setVrMenuOpen(false);
             }}
             onToggleHotspots={() => setHotspotsVisible((v) => !v)}
             onExitVR={() => getSceneEl()?.exitVR()}

@@ -209,12 +209,34 @@ type PanelPlacement = {
   tilt?: number; // degrees the panel leans back (like a lectern), for tall panels
 };
 
+// With hand tracking, panels come within arm's reach so their buttons can be
+// touched with a fingertip (like the Quest's own keyboard and menus) — shrunk in
+// proportion, so they look exactly as big as at their normal distance.
+const REACH_DISTANCE = 0.58; // meters ahead of the eyes
+const REACH_DROP = 0.22; // meters below eye level
+const REACH_TILT = 25; // degrees leaned back
+
+/** True while the visitor is using tracked hands (not controllers) in VR. */
+export function usingHands(): boolean {
+  const session = (document.querySelector('a-scene') as unknown as { xrSession?: { inputSources?: Iterable<any> } } | null)
+    ?.xrSession;
+  return !!session?.inputSources && Array.from(session.inputSources).some((s) => !!s.hand);
+}
+
 /** Where to put a panel: straight ahead of wherever the visitor is looking (level). */
 function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {}) {
   const [pose] = useState(() => {
     const THREE = (window as unknown as { AFRAME?: any }).AFRAME?.THREE;
     const cam = (document.querySelector('a-scene') as unknown as { camera?: any } | null)?.camera;
-    if (!THREE || !cam) return { position: `0 ${-drop} -${distance}`, rotation: `${-tilt} 0 0` };
+    let scale = 1;
+    if (usingHands() && distance > REACH_DISTANCE) {
+      scale = REACH_DISTANCE / distance;
+      distance = REACH_DISTANCE;
+      drop = Math.max(REACH_DROP, drop * scale);
+      tilt = Math.max(REACH_TILT, tilt);
+    }
+    const scaleAttr = `${scale} ${scale} ${scale}`;
+    if (!THREE || !cam) return { position: `0 ${-drop} -${distance}`, rotation: `${-tilt} 0 0`, scale: scaleAttr };
     const pos = new THREE.Vector3();
     cam.getWorldPosition(pos);
     // Yaw from a YXZ decomposition stays well-defined while looking far down
@@ -227,6 +249,7 @@ function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {
       position: `${p.x.toFixed(3)} ${(pos.y - drop).toFixed(3)} ${p.z.toFixed(3)}`,
       // A-Frame applies rotation in YXZ order: face the visitor, then lean back.
       rotation: `${-tilt} ${yawDeg.toFixed(2)} 0`,
+      scale: scaleAttr,
     };
   });
   return pose;
@@ -235,7 +258,7 @@ function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {
 export function PanelRoot({ children, placement }: { children: React.ReactNode; placement?: PanelPlacement }) {
   const pose = usePanelPose(placement);
   return (
-    <a-entity position={pose.position} rotation={pose.rotation}>
+    <a-entity position={pose.position} rotation={pose.rotation} scale={pose.scale}>
       {children}
     </a-entity>
   );
@@ -874,7 +897,7 @@ export function VRLoginPanel({ onSuccess, onCancel }: { onSuccess: () => void; o
     ctx.fillStyle = error ? '#fca5a5' : '#94a3b8';
     const message = busy
       ? 'Memeriksa…'
-      : error ?? 'Arahkan laser ke tombol, lalu tekan trigger (atau pinch) untuk mengetik.';
+      : error ?? 'Sentuh tombol dengan ujung jari, atau arahkan laser lalu tekan trigger / pinch.';
     const laid = layoutBlocks(ctx, [{ text: message, size: 21, color: ctx.fillStyle as string, lineHeight: 28, maxLines: 2, weight: error ? 600 : 400 }], px(W - pad * 2));
     drawBlocks(ctx, laid, px(pad), px(T_MESSAGE));
   };
