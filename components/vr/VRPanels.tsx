@@ -70,10 +70,10 @@ export function registerVrLayer() {
 }
 
 // ---- Canvas drawing ------------------------------------------------------------
-const PX_PER_M = 600; // ≈ the Quest's angular resolution at ~2m viewing distance
-const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+export const PX_PER_M = 600; // ≈ the Quest's angular resolution at ~2m viewing distance
+export const FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
 
-type TextBlock = {
+export type TextBlock = {
   text: string;
   size: number; // px
   weight?: number;
@@ -106,7 +106,7 @@ function setFont(ctx: CanvasRenderingContext2D, b: TextBlock) {
 }
 
 /** Lay out text blocks top-down within maxWidth; returns the lines and total height. */
-function layoutBlocks(ctx: CanvasRenderingContext2D, blocks: TextBlock[], maxWidth: number, maxHeight = Infinity) {
+export function layoutBlocks(ctx: CanvasRenderingContext2D, blocks: TextBlock[], maxWidth: number, maxHeight = Infinity) {
   const out: { block: TextBlock; lines: string[] }[] = [];
   let h = 0;
   for (const block of blocks) {
@@ -130,7 +130,7 @@ function layoutBlocks(ctx: CanvasRenderingContext2D, blocks: TextBlock[], maxWid
   return { out, height: h };
 }
 
-function drawBlocks(ctx: CanvasRenderingContext2D, laid: ReturnType<typeof layoutBlocks>, x: number, y: number) {
+export function drawBlocks(ctx: CanvasRenderingContext2D, laid: ReturnType<typeof layoutBlocks>, x: number, y: number) {
   ctx.textBaseline = 'top';
   let cy = y;
   for (const { block, lines } of laid.out) {
@@ -144,7 +144,7 @@ function drawBlocks(ctx: CanvasRenderingContext2D, laid: ReturnType<typeof layou
   }
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+export function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -154,7 +154,7 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
   ctx.closePath();
 }
 
-function newCanvas(wM: number, hM: number) {
+export function newCanvas(wM: number, hM: number) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(wM * PX_PER_M);
   canvas.height = Math.round(hM * PX_PER_M);
@@ -163,7 +163,7 @@ function newCanvas(wM: number, hM: number) {
 }
 
 /** Dark card background shared by every panel (matches the footer bar's palette). */
-function drawCard(ctx: CanvasRenderingContext2D, w: number, h: number) {
+export function drawCard(ctx: CanvasRenderingContext2D, w: number, h: number) {
   roundRect(ctx, 2, 2, w - 4, h - 4, 28);
   ctx.fillStyle = '#0f172a'; // opaque: hotspots behind must not ghost through
   ctx.fill();
@@ -182,7 +182,7 @@ function drawCard(ctx: CanvasRenderingContext2D, w: number, h: number) {
 // ---- Shared pieces ---------------------------------------------------------------
 
 /** A-Frame entities emit plain DOM 'click' events (see xr-pointer) — not React's. */
-function useEntityClick<T extends HTMLElement>(onClick?: () => void) {
+export function useEntityClick<T extends HTMLElement>(onClick?: () => void) {
   const ref = useRef<T>(null);
   const handler = useRef(onClick);
   handler.current = onClick;
@@ -194,6 +194,13 @@ function useEntityClick<T extends HTMLElement>(onClick?: () => void) {
     return () => el.removeEventListener('click', fn);
   }, []);
   return ref;
+}
+
+/** Heading (radians, around world Y) of the camera — 0 = looking down -Z. */
+export function headYaw(cam: any, THREE: any): number {
+  const q = new THREE.Quaternion();
+  cam.getWorldQuaternion(q);
+  return new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
 }
 
 type PanelPlacement = {
@@ -209,14 +216,13 @@ function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {
     const cam = (document.querySelector('a-scene') as unknown as { camera?: any } | null)?.camera;
     if (!THREE || !cam) return { position: `0 ${-drop} -${distance}`, rotation: `${-tilt} 0 0` };
     const pos = new THREE.Vector3();
-    const dir = new THREE.Vector3();
     cam.getWorldPosition(pos);
-    cam.getWorldDirection(dir);
-    dir.y = 0;
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1); // looking straight up/down
-    dir.normalize();
+    // Yaw from a YXZ decomposition stays well-defined while looking far down
+    // (e.g. at the menu bar), where a flattened view vector would be ~zero.
+    const yaw = headYaw(cam, THREE);
+    const dir = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
     const p = pos.clone().addScaledVector(dir, distance);
-    const yawDeg = (Math.atan2(-dir.x, -dir.z) * 180) / Math.PI;
+    const yawDeg = (yaw * 180) / Math.PI;
     return {
       position: `${p.x.toFixed(3)} ${(pos.y - drop).toFixed(3)} ${p.z.toFixed(3)}`,
       // A-Frame applies rotation in YXZ order: face the visitor, then lean back.
@@ -226,7 +232,7 @@ function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {
   return pose;
 }
 
-function PanelRoot({ children, placement }: { children: React.ReactNode; placement?: PanelPlacement }) {
+export function PanelRoot({ children, placement }: { children: React.ReactNode; placement?: PanelPlacement }) {
   const pose = usePanelPose(placement);
   return (
     <a-entity position={pose.position} rotation={pose.rotation}>
@@ -237,7 +243,7 @@ function PanelRoot({ children, placement }: { children: React.ReactNode; placeme
 
 /** The card plane — also a .clickable so lasers stop on it instead of passing
  *  through to hotspots behind the panel (it has no click handler). */
-function CardPlane({ src, width, height, x = 0, y = 0 }: { src: string; width: number; height: number; x?: number; y?: number }) {
+export function CardPlane({ src, width, height, x = 0, y = 0 }: { src: string; width: number; height: number; x?: number; y?: number }) {
   return (
     <a-plane
       class="clickable"
@@ -271,23 +277,28 @@ function buttonTexture(label: string, width: number, height: number, variant: Bu
   ctx.lineWidth = 3;
   ctx.strokeStyle = primary || active ? '#fcd34d' : 'rgba(255, 255, 255, 0.35)';
   ctx.stroke();
-  // Shrink the label until it fits (e.g. "Sembunyikan" on a narrow button).
-  let size = Math.round(h * 0.42);
+  // Shrink the label until it fits (e.g. "Sembunyikan" on a narrow button);
+  // past 60% of the normal size, cut it with an ellipsis instead.
+  const base = Math.round(h * 0.42);
+  let size = base;
   ctx.font = `700 ${size}px ${FONT}`;
-  while (size > 12 && ctx.measureText(label).width > w - 28) {
+  while (size > base * 0.6 && ctx.measureText(label).width > w - 28) {
     size -= 1;
     ctx.font = `700 ${size}px ${FONT}`;
   }
+  let text = label;
+  while (text.length > 1 && ctx.measureText(text).width > w - 28) text = text.slice(0, -1);
+  if (text !== label) text = `${text.slice(0, -1).trimEnd()}…`;
   ctx.fillStyle = primary ? '#0a1226' : '#ffffff';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(label, w / 2, h / 2 + 1);
+  ctx.fillText(text, w / 2, h / 2 + 1);
   const url = canvas.toDataURL('image/png');
   buttonTextures.set(key, url);
   return url;
 }
 
-function VRButton({
+export function VRButton({
   label,
   x,
   y,
@@ -596,7 +607,7 @@ export function VRNoticePanel({ title, message, actions }: { title: string; mess
  * (A new data-URL `src` per keystroke would leave every decoded image in
  * A-Frame's texture-source cache for good — megabytes per key press.)
  */
-function CanvasPlane({
+export function CanvasPlane({
   width,
   height,
   version,
@@ -659,7 +670,7 @@ function CanvasPlane({
 }
 
 /** Invisible hit area (e.g. over a text field drawn on the card). */
-function HitArea({ x, y, width, height, name, onClick }: {
+export function HitArea({ x, y, width, height, name, onClick }: {
   x: number; y: number; width: number; height: number; name: string; onClick: () => void;
 }) {
   const ref = useEntityClick<HTMLElement>(onClick);

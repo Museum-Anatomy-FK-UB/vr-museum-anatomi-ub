@@ -94,6 +94,17 @@ export function registerSkyCrossfade() {
     },
 
     /**
+     * Re-orient the panorama on screen (or the one fading in) without reloading
+     * it — used when leaving VR, where rooms may have been turned to face the
+     * visitor (see VRScene's worldYaw).
+     */
+    setYaw(this: any, rotationYDeg: number, rollZDeg = 0) {
+      const THREE = AFRAME.THREE;
+      const mesh = this.fading ? this._fadeIncoming : this.activeIsA ? this.meshA : this.meshB;
+      mesh?.rotation.set(0, THREE.MathUtils.degToRad(rotationYDeg || 0), THREE.MathUtils.degToRad(rollZDeg || 0));
+    },
+
+    /**
      * Blend from the current panorama to a new one — direct dissolve, no black.
      * `pushDistance` overrides the schema's push for this one transition: pass 0
      * for a PURE dissolve with no "forward" motion (e.g. a closed→open door photo

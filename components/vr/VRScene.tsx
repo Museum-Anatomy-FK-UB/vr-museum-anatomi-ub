@@ -19,7 +19,16 @@ import { registerSkyCrossfade } from './skyCrossfade';
 import { registerScrollZoom } from './scrollZoom';
 import { registerLittlePlanetIntro } from './littlePlanetIntro';
 import { registerXrPointer } from './xrPointer';
-import { registerVrLayer, VRInfoPanel, VRLoginPanel, VRNoticePanel, VRPhotoPanel, type VRNoticeAction } from './VRPanels';
+import {
+  headYaw,
+  registerVrLayer,
+  VRInfoPanel,
+  VRLoginPanel,
+  VRNoticePanel,
+  VRPhotoPanel,
+  type VRNoticeAction,
+} from './VRPanels';
+import { registerVrMenuFollow, VRFloorplanPanel, VRLocationsPanel, VRMenuBar } from './VRMenu';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -36,6 +45,29 @@ const getSceneEl = () => document.querySelector('a-scene') as unknown as XRScene
 function isImmersive() {
   const sceneEl = getSceneEl();
   return !!sceneEl?.is('vr-mode') && !!sceneEl.xrSession;
+}
+
+/**
+ * Which way (degrees around world Y) a room should be turned on arrival so its
+ * intended front — the view `initial_yaw` defines — ends up where the visitor is
+ * looking. In 2D that's 0: there the CAMERA is turned to the front instead (see
+ * recenterLook). In a headset the camera IS the visitor's head and must never be
+ * forced, so the room (panorama + hotspots together, so hotspots stay on their
+ * objects) is turned to face them instead — the same "arrive looking at the right
+ * thing" as in 2D, wherever they happened to be facing.
+ */
+function arrivalYawDeg(currentDeg: number): number {
+  if (!isImmersive()) return 0;
+  const cam = (getSceneEl() as unknown as { camera?: { getWorldQuaternion(q: unknown): unknown } } | null)?.camera;
+  const THREE = (window as unknown as { AFRAME?: { THREE?: any } }).AFRAME?.THREE;
+  if (!cam || !THREE) return currentDeg;
+  // Looking (nearly) straight up or down there is no meaningful heading — it can
+  // even flip 180° past the vertical — so keep the room's current orientation.
+  const q = new THREE.Quaternion();
+  cam.getWorldQuaternion(q);
+  const pitch = new THREE.Euler().setFromQuaternion(q, 'YXZ').x;
+  if (Math.abs(pitch) > (70 * Math.PI) / 180) return currentDeg;
+  return (headYaw(cam, THREE) * 180) / Math.PI;
 }
 
 /**
@@ -161,6 +193,10 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [vrLoginSceneId, setVrLoginSceneId] = useState<string | null>(null);
   const vrLoginSceneIdRef = useRef<string | null>(null);
   vrLoginSceneIdRef.current = vrLoginSceneId;
+  // How far the current room is turned to face the visitor (VR only, degrees —
+  // see arrivalYawDeg). Applied to the panorama AND the hotspot layer.
+  const [worldYaw, setWorldYaw] = useState(0);
+  const worldYawRef = useRef(0);
   // Small on-screen message (outside VR), optionally with a link to open.
   const [toast, setToast] = useState<{ message: string; href?: string; newTab?: boolean } | null>(null);
 
@@ -198,6 +234,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerLittlePlanetIntro();
       registerXrPointer();
       registerVrLayer();
+      registerVrMenuFollow();
       if (mounted) setReady(true);
     });
     return () => {
@@ -254,6 +291,23 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     const exit = () => {
       setInVR(false);
       setVrNotice(null);
+      // Back in 2D: undo the VR-only room turn and land on the room's intended
+      // view, exactly as after a 2D navigation.
+      const scene = activeSceneRef.current;
+      if (worldYawRef.current !== 0 && scene) {
+        (skyRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
+          'sky-crossfade'
+        ]?.setYaw(scene.initial_yaw ?? 0, scene.horizon_roll ?? 0);
+        worldYawRef.current = 0;
+        setWorldYaw(0);
+      }
+      const look = (cameraRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
+        'look-controls'
+      ];
+      if (look?.yawObject && look?.pitchObject) {
+        look.yawObject.rotation.y = 0;
+        look.pitchObject.rotation.x = 0;
+      }
       // Leaving VR mid-login continues in the regular HTML form.
       const loginSceneId = vrLoginSceneIdRef.current;
       if (loginSceneId) {
@@ -400,7 +454,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       if (transitionUrl) {
         await sky?.components?.['sky-crossfade']?.crossfadeTo(
           transitionUrl,
-          activeSceneRef.current?.initial_yaw ?? 0,
+          (activeSceneRef.current?.initial_yaw ?? 0) + worldYawRef.current,
           500,
           activeSceneRef.current?.horizon_roll ?? 0,
           0,
@@ -414,6 +468,11 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setActivePhotoHotspot(null);
       setVrNotice(null);
       setVrLoginSceneId(null);
+      // In the headset, menu panels would stand in front of the new room.
+      if (isImmersive()) {
+        setGalleryOpen(false);
+        setFloorplanOpen(false);
+      }
 
       // Old hotspots shrink out (220ms)
       document.querySelectorAll('a-entity.hs-anim').forEach((el) => {
@@ -425,10 +484,14 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         (cam as unknown as { components?: Record<string, any> }).components?.['scroll-zoom']?.cancel?.();
       }
 
+      // VR: turn the new room so its front faces wherever the visitor is looking
+      // (0 in 2D — the camera is re-centered below instead).
+      const yawOffset = arrivalYawDeg(worldYawRef.current);
+
       // Blend old panorama -> new (700ms) + "push forward" on the old panorama
       const blend = sky?.components?.['sky-crossfade']?.crossfadeTo(
         next.panorama_url,
-        next.initial_yaw ?? 0,
+        (next.initial_yaw ?? 0) + yawOffset,
         700,
         next.horizon_roll ?? 0,
       );
@@ -442,6 +505,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       // Swap hotspots & URL mid-blend (old hotspots have fully shrunk away;
       // the new ones mount and grow in during the rest of the blend)
       await wait(300);
+      worldYawRef.current = yawOffset;
+      setWorldYaw(yawOffset);
       setActiveScene(next);
       window.history.replaceState(null, '', `/vr/${next.id}`);
 
@@ -608,6 +673,15 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   // First room by order_index — no hardcoded fallback; simply a no-op until sceneList loads.
   const mainSceneId = sceneList[0]?.id;
 
+  // One VR panel at a time: opening a menu panel closes whatever else is up.
+  const closeVrPanels = () => {
+    setActiveCollectionId(null);
+    setActivePhotoHotspot(null);
+    setVrNotice(null);
+    setGalleryOpen(false);
+    setFloorplanOpen(false);
+  };
+
   return (
     <div ref={containerRef} className="fixed inset-0 bg-black">
       <a-scene
@@ -663,16 +737,20 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         {/* Held back during the intro so the hotspots play their grow-in animation
             when the planet finishes unrolling, rather than popping in fully grown
             behind the intro quad. */}
-        {hotspotsVisible && activeScene && !introPlaying && (
-          <HotspotLayer
-            key={activeScene.id}
-            hotspots={visibleHotspots}
-            onNavigate={navigateTo}
-            onInfo={setActiveCollectionId}
-            onPhoto={setActivePhotoHotspot}
-            onExternalLink={openExternal}
-          />
-        )}
+        {/* Turned together with the panorama (worldYaw, VR only) so hotspots
+            stay on the objects they mark. */}
+        <a-entity rotation={`0 ${worldYaw} 0`}>
+          {hotspotsVisible && activeScene && !introPlaying && (
+            <HotspotLayer
+              key={activeScene.id}
+              hotspots={visibleHotspots}
+              onNavigate={navigateTo}
+              onInfo={setActiveCollectionId}
+              onPhoto={setActivePhotoHotspot}
+              onExternalLink={openExternal}
+            />
+          )}
+        </a-entity>
 
         {/* Controller/hand lasers + trigger/pinch clicks inside an XR session. */}
         <a-entity xr-pointer="reticle: #vr-gaze-reticle" />
@@ -709,7 +787,51 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
               collectionId={activeCollectionId}
               onClose={() => setActiveCollectionId(null)}
             />
+          ) : galleryOpen ? (
+            <VRLocationsPanel
+              scenes={sceneList}
+              currentId={activeScene?.id ?? null}
+              onSelect={(id) => {
+                setGalleryOpen(false);
+                navigateTo(id);
+              }}
+              onClose={() => setGalleryOpen(false)}
+            />
+          ) : floorplanOpen ? (
+            <VRFloorplanPanel
+              scenes={sceneList}
+              currentId={activeScene?.id ?? null}
+              onSelect={(id) => {
+                setFloorplanOpen(false);
+                navigateTo(id);
+              }}
+              onClose={() => setFloorplanOpen(false)}
+            />
           ) : null)}
+
+        {/* The footer bar's actions, below the line of sight (hidden while the
+            login keyboard is up — it would sit right in front of it). */}
+        {inVR && !vrLoginSceneId && (
+          <VRMenuBar
+            hotspotsVisible={hotspotsVisible}
+            open={galleryOpen ? 'locations' : floorplanOpen ? 'floorplan' : null}
+            onMainLocation={() => {
+              if (mainSceneId) navigateTo(mainSceneId);
+            }}
+            onAllLocations={() => {
+              const opening = !galleryOpen;
+              closeVrPanels();
+              setGalleryOpen(opening);
+            }}
+            onFloorplan={() => {
+              const opening = !floorplanOpen;
+              closeVrPanels();
+              setFloorplanOpen(opening);
+            }}
+            onToggleHotspots={() => setHotspotsVisible((v) => !v)}
+            onExitVR={() => getSceneEl()?.exitVR()}
+          />
+        )}
 
         {/* Nadir patch — covers the tripod at the bottom of the 360° photo with the
             UB logo. Always points straight down regardless of each scene's initial_yaw,
@@ -763,7 +885,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         onToggleHotspots={() => setHotspotsVisible((v) => !v)}
       />
 
-      {floorplanOpen && (
+      {!inVR && floorplanOpen && (
         <FloorplanMap
           scenes={sceneList}
           currentId={activeScene?.id ?? null}
@@ -780,7 +902,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         />
       )}
 
-      {galleryOpen && (
+      {!inVR && galleryOpen && (
         <SceneGallery
           scenes={sceneList}
           currentId={activeScene?.id ?? null}

@@ -25,6 +25,7 @@ vr-museum-anatomi-ub/
 │   │   ├── FloorplanMap.tsx    # Museum map / floor plan overlay
 │   │   ├── VRPanels.tsx        # In-headset info/photo/notice panels (VR mode)
 │   │   ├── xrPointer.ts        # Controller/hand lasers, trigger/pinch & gaze input (VR mode)
+│   │   ├── VRMenu.tsx          # In-headset menu bar, All Location & Denah panels (VR mode)
 │   │   └── VRModeButton.tsx    # WebXR / Cardboard toggle
 │   └── ui/                 # Generic UI components (no A-Frame)
 │       ├── AudioPlayer.tsx     # Voice-over player

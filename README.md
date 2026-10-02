@@ -125,6 +125,14 @@ Inside the headset:
 | Hand tracking | laser from the hand | pinch |
 | No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
 
+Look **down** to find the menu bar (Main Location, All Location, Denah,
+Show/Hide Hotspot, Keluar VR) — the same actions as the 2D footer bar. It stays
+put while you look around and swings round only after you turn well away.
+
+Arriving in a room, its intended view (`initial_yaw`) is placed **wherever you
+are facing** — the room (panorama and hotspots together) is turned to you, the
+way the 2D view re-centers, instead of forcing the headset camera.
+
 Info/photo hotspots open a panel **inside VR** (HTML modals are invisible in a
 headset). The restricted-area login also works inside VR: a virtual keyboard
 is typed on with the laser (trigger) or a pinch — a paired Bluetooth keyboard
