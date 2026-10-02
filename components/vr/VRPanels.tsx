@@ -243,10 +243,13 @@ export function PanelRoot({ children, placement }: { children: React.ReactNode; 
 
 /** The card plane — also a .clickable so lasers stop on it instead of passing
  *  through to hotspots behind the panel (it has no click handler). */
-export function CardPlane({ src, width, height, x = 0, y = 0 }: { src: string; width: number; height: number; x?: number; y?: number }) {
+export function CardPlane({ src, width, height, x = 0, y = 0, blocking = true }: {
+  src: string; width: number; height: number; x?: number; y?: number;
+  blocking?: boolean; // false: purely visual — lasers pass through to what's behind
+}) {
   return (
     <a-plane
-      class="clickable"
+      class={blocking ? 'clickable' : undefined}
       vr-layer="order: 0"
       position={`${x} ${y} 0`}
       width={width}

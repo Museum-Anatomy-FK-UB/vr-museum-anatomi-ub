@@ -197,6 +197,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   // see arrivalYawDeg). Applied to the panorama AND the hotspot layer.
   const [worldYaw, setWorldYaw] = useState(0);
   const worldYawRef = useRef(0);
+  // VR menu bar: closed (just the small "Menu" button) unless opened.
+  const [vrMenuOpen, setVrMenuOpen] = useState(false);
   // Small on-screen message (outside VR), optionally with a link to open.
   const [toast, setToast] = useState<{ message: string; href?: string; newTab?: boolean } | null>(null);
 
@@ -282,6 +284,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       if (!sceneEl.xrSession) return;
       setInVR(true);
       setToast(null);
+      setVrMenuOpen(false);
       // The little-planet intro is a flat quad sized to the 2D camera — it has no
       // meaning in stereo, so jump straight to the room if it's still playing.
       (planetRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
@@ -291,6 +294,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     const exit = () => {
       setInVR(false);
       setVrNotice(null);
+      setVrMenuOpen(false);
       // Back in 2D: undo the VR-only room turn and land on the room's intended
       // view, exactly as after a 2D navigation.
       const scene = activeSceneRef.current;
@@ -316,11 +320,15 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         setLoginOpen(true);
       }
     };
+    // B / Y on a controller (emitted by xr-pointer) opens/closes the VR menu.
+    const toggleMenu = () => setVrMenuOpen((v) => !v);
     sceneEl.addEventListener('enter-vr', enter);
     sceneEl.addEventListener('exit-vr', exit);
+    sceneEl.addEventListener('vr-menu-toggle', toggleMenu);
     return () => {
       sceneEl.removeEventListener('enter-vr', enter);
       sceneEl.removeEventListener('exit-vr', exit);
+      sceneEl.removeEventListener('vr-menu-toggle', toggleMenu);
     };
   }, [ready]);
 
@@ -468,10 +476,12 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setActivePhotoHotspot(null);
       setVrNotice(null);
       setVrLoginSceneId(null);
-      // In the headset, menu panels would stand in front of the new room.
+      // In the headset, menu panels would stand in front of the new room, and
+      // the open menu bar would sit over its floor arrows.
       if (isImmersive()) {
         setGalleryOpen(false);
         setFloorplanOpen(false);
+        setVrMenuOpen(false);
       }
 
       // Old hotspots shrink out (220ms)
@@ -809,10 +819,13 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
             />
           ) : null)}
 
-        {/* The footer bar's actions, below the line of sight (hidden while the
-            login keyboard is up — it would sit right in front of it). */}
+        {/* The footer bar's actions, low below the line of sight: a small "Menu"
+            button that opens the bar (or B / Y). Hidden while the login keyboard
+            is up — it would sit right in front of it. */}
         {inVR && !vrLoginSceneId && (
           <VRMenuBar
+            expanded={vrMenuOpen}
+            onToggleMenu={() => setVrMenuOpen((v) => !v)}
             hotspotsVisible={hotspotsVisible}
             open={galleryOpen ? 'locations' : floorplanOpen ? 'floorplan' : null}
             onMainLocation={() => {

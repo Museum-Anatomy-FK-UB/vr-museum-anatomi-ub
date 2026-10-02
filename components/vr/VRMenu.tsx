@@ -16,9 +16,14 @@ import {
 
 // The footer control bar, inside the headset. HTML is invisible during an XR
 // session, so the same actions (Main Location, All Location, Denah, show/hide
-// hotspots) live on a small bar floating BELOW the visitor's line of sight — look
-// down to use it, look up and it's out of the way. Fullscreen / Mode VR make no
-// sense inside VR, so that slot becomes "Keluar VR".
+// hotspots) live on a bar floating BELOW the visitor's line of sight. Fullscreen /
+// Mode VR make no sense inside VR, so that slot becomes "Keluar VR".
+//
+// Closed by default: only a small "Menu" button sits low (~60° down), under the
+// floor arrows (which lie ~20–49° down) so it never stands between a laser and a
+// hotspot. It opens with that button (laser + trigger, hand + pinch, or gaze) or
+// with B / Y on a controller (see xr-pointer), and closes again on navigation.
+// The open bar's background lets lasers through — only its buttons catch them.
 
 // ---- Lazy-follow placement --------------------------------------------------------
 // The bar stays put while the visitor looks around nearby, and only swings round
@@ -33,9 +38,8 @@ export function registerVrMenuFollow() {
 
   AFRAME.registerComponent('vr-menu-follow', {
     schema: {
-      distance: { default: 0.85 }, // meters ahead (horizontally) — within laser reach
-      drop: { default: 0.6 }, // meters below eye level
-      tilt: { default: 38 }, // degrees leaned back so it faces the eyes
+      distance: { default: 0.8 }, // meters from the eyes — within easy laser reach
+      pitch: { default: -60 }, // degrees below the line of sight (faces the eyes)
       threshold: { default: 40 }, // degrees of head turn before it follows
       smooth: { default: 220 }, // ms time-constant of the follow motion
     },
@@ -67,21 +71,25 @@ export function registerVrMenuFollow() {
         if (Math.abs(diff) < 2 * DEG) this.turning = false;
       }
 
+      const pitch = this.data.pitch * DEG;
+      const ahead = Math.cos(pitch) * this.data.distance;
       this.target.set(
-        this.head.x - Math.sin(this.yaw) * this.data.distance,
-        this.head.y - this.data.drop,
-        this.head.z - Math.cos(this.yaw) * this.data.distance,
+        this.head.x - Math.sin(this.yaw) * ahead,
+        this.head.y + Math.sin(pitch) * this.data.distance,
+        this.head.z - Math.cos(this.yaw) * ahead,
       );
       const o = this.el.object3D;
       if (first) o.position.copy(this.target);
       else o.position.lerp(this.target, alpha);
-      o.rotation.set(-this.data.tilt * DEG, this.yaw, 0); // entity order is YXZ
+      // Lean back by the same angle so the face points straight at the eyes
+      // (entity rotation order is YXZ).
+      o.rotation.set(pitch, this.yaw, 0);
     },
   });
 }
 
 // ---- Icons (same artwork as SceneControlsBar, 24×24 viewBox) --------------------
-type IconName = 'building' | 'grid' | 'map' | 'eye' | 'eye-off' | 'exit';
+type IconName = 'building' | 'grid' | 'map' | 'eye' | 'eye-off' | 'exit' | 'menu' | 'close';
 function drawIcon(ctx: CanvasRenderingContext2D, name: IconName) {
   const stroke = (d: string) => ctx.stroke(new Path2D(d));
   switch (name) {
@@ -109,6 +117,12 @@ function drawIcon(ctx: CanvasRenderingContext2D, name: IconName) {
       break;
     case 'exit':
       stroke('M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9');
+      break;
+    case 'menu':
+      stroke('M4 6h16M4 12h16M4 18h16');
+      break;
+    case 'close':
+      stroke('M18 6 6 18M6 6l12 12');
       break;
   }
 }
@@ -176,7 +190,64 @@ function IconButton({ icon, label, name, x, w, h, active = false, onClick }: {
   );
 }
 
+const pillTextures = new Map<string, string>();
+function pillTexture(icon: IconName, label: string, w: number, h: number, active: boolean) {
+  const key = `${icon}|${label}|${w}|${h}|${active}`;
+  const cached = pillTextures.get(key);
+  if (cached) return cached;
+  const { canvas, ctx } = newCanvas(w, h);
+  const cw = canvas.width;
+  const ch = canvas.height;
+  roundRect(ctx, 3, 3, cw - 6, ch - 6, (ch - 6) / 2);
+  ctx.fillStyle = active ? '#2563eb' : 'rgba(22, 29, 51, 0.94)';
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = active ? '#60a5fa' : 'rgba(255, 255, 255, 0.35)';
+  ctx.stroke();
+  ctx.font = `700 ${Math.round(ch * 0.42)}px ${FONT}`;
+  const iconPx = ch * 0.5;
+  const gap = ch * 0.18;
+  const total = iconPx + gap + ctx.measureText(label).width;
+  const x0 = (cw - total) / 2;
+  ctx.save();
+  ctx.translate(x0, (ch - iconPx) / 2);
+  ctx.scale(iconPx / 24, iconPx / 24);
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = '#ffffff';
+  drawIcon(ctx, icon);
+  ctx.restore();
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x0 + iconPx + gap, ch / 2 + 1);
+  const url = canvas.toDataURL('image/png');
+  pillTextures.set(key, url);
+  return url;
+}
+
+function MenuToggle({ open, w, h, onClick }: { open: boolean; w: number; h: number; onClick: () => void }) {
+  const ref = useEntityClick<HTMLElement>(onClick);
+  const src = useMemo(() => pillTexture(open ? 'close' : 'menu', open ? 'Tutup' : 'Menu', w, h, open), [open, w, h]);
+  return (
+    <a-plane
+      ref={ref}
+      class="clickable"
+      data-name="menu-toggle"
+      vr-layer="order: 3"
+      width={w}
+      height={h}
+      src={src}
+      material="shader: flat; transparent: true"
+      animation__enter="property: scale; startEvents: mouseenter; to: 1.1 1.1 1.1; dur: 120; easing: easeOutQuad"
+      animation__leave="property: scale; startEvents: mouseleave; to: 1 1 1; dur: 120; easing: easeOutQuad"
+    />
+  );
+}
+
 export function VRMenuBar({
+  expanded,
+  onToggleMenu,
   hotspotsVisible,
   open,
   onMainLocation,
@@ -185,6 +256,8 @@ export function VRMenuBar({
   onToggleHotspots,
   onExitVR,
 }: {
+  expanded: boolean;
+  onToggleMenu: () => void;
   hotspotsVisible: boolean;
   open: 'locations' | 'floorplan' | null;
   onMainLocation: () => void;
@@ -221,22 +294,30 @@ export function VRMenuBar({
     ctx.stroke();
     return canvas.toDataURL('image/png');
   });
+  const PILL_W = 0.2;
+  const PILL_H = 0.065;
   return (
     <a-entity vr-menu-follow="">
-      <CardPlane src={bg} width={W} height={H} />
-      {items.map((it, i) => (
-        <IconButton
-          key={it.name}
-          name={it.name}
-          icon={it.icon}
-          label={it.label}
-          x={-W / 2 + PAD + BW / 2 + i * (BW + GAP)}
-          w={BW}
-          h={BH}
-          active={!!it.active}
-          onClick={it.onClick}
-        />
-      ))}
+      <MenuToggle open={expanded} w={PILL_W} h={PILL_H} onClick={onToggleMenu} />
+      {expanded && (
+        // Opens just above the Menu button.
+        <a-entity position={`0 ${PILL_H / 2 + 0.02 + H / 2} 0`}>
+          <CardPlane src={bg} width={W} height={H} blocking={false} />
+          {items.map((it, i) => (
+            <IconButton
+              key={it.name}
+              name={it.name}
+              icon={it.icon}
+              label={it.label}
+              x={-W / 2 + PAD + BW / 2 + i * (BW + GAP)}
+              w={BW}
+              h={BH}
+              active={!!it.active}
+              onClick={it.onClick}
+            />
+          ))}
+        </a-entity>
+      )}
     </a-entity>
   );
 }

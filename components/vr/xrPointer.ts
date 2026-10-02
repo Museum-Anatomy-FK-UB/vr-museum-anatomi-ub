@@ -14,6 +14,7 @@
 //     targetRaySpace — so what the laser shows is exactly what gets clicked.
 //   - Gaze: only when there is no tracked pointer (e.g. Cardboard), a reticle in
 //     the view center activates a hotspot after dwelling on it (fuse).
+//   - B / Y on a controller emits 'vr-menu-toggle' on the scene (VR menu).
 // A click is re-emitted as a plain 'click' on the .clickable root entity, which
 // is what HotspotLayer (and the in-VR panels) already listen for.
 export function registerXrPointer() {
@@ -223,7 +224,7 @@ export function registerXrPointer() {
         seen.add(source);
         let laser = this.lasers.get(source);
         if (!laser) {
-          laser = { ...makeLaser(), hoverEl: null };
+          laser = { ...makeLaser(), hoverEl: null, menuDown: false };
           sceneEl.object3D.add(laser.group);
           this.lasers.set(source, laser);
         }
@@ -250,6 +251,16 @@ export function registerXrPointer() {
         // A light tick when the laser moves onto something new.
         if (hit && hit.el !== laser.hoverEl) this.pulse(source, 0.25, 15);
         laser.hoverEl = hit?.el ?? null;
+
+        // B / Y (the upper face button, xr-standard index 5 on Quest Touch)
+        // opens/closes the VR menu — no aiming needed. Hands have no buttons;
+        // they use the on-screen Menu button instead.
+        const menuDown = !!source.gamepad?.buttons?.[5]?.pressed;
+        if (menuDown && !laser.menuDown) {
+          this.pulse(source, 0.4, 25);
+          sceneEl.emit('vr-menu-toggle');
+        }
+        laser.menuDown = menuDown;
       }
 
       // Drop lasers of input sources that went away (e.g. controllers put down

@@ -125,9 +125,19 @@ Inside the headset:
 | Hand tracking | laser from the hand | pinch |
 | No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
 
-Look **down** to find the menu bar (Main Location, All Location, Denah,
-Show/Hide Hotspot, Keluar VR) — the same actions as the 2D footer bar. It stays
-put while you look around and swings round only after you turn well away.
+The menu (Main Location, All Location, Denah, Show/Hide Hotspot, Keluar VR —
+the same actions as the 2D footer bar) is **closed by default** so it never
+covers a hotspot: only a small **Menu** button sits low, ~60° below eye level
+(under the floor arrows). Open/close it with:
+| Input | How |
+|---|---|
+| Touch controllers | **B** or **Y** button — or laser + trigger on the Menu button |
+| Hand tracking | laser from the hand + **pinch** on the Menu button |
+| No controller/hand | look at the Menu button for 1s |
+
+It closes again when you move to another room. It stays put while you look
+around and swings round only after you turn well away; its background lets the
+laser through, only its buttons catch it.
 
 Arriving in a room, its intended view (`initial_yaw`) is placed **wherever you
 are facing** — the room (panorama and hotspots together) is turned to you, the
