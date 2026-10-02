@@ -135,9 +135,14 @@ covers a hotspot: only a small **Menu** button sits low, ~60° below eye level
 | Hand tracking | laser from the hand + **pinch** on the Menu button |
 | No controller/hand | look at the Menu button for 1s |
 
-It closes again when you move to another room. It stays put while you look
-around and swings round only after you turn well away; its background lets the
-laser through, only its buttons catch it.
+The menu only responds while you are **looking at it** (the Menu button lights
+up); the rest of the time lasers pass straight through it, so a controller held
+at the hip can always reach the floor arrows. It closes again when you move to
+another room, stays put while you look around and swings round only after you
+turn well away.
+
+In the emulator's Play mode the lasers follow your view: look down at the Menu
+button until it lights up, then left-click — or press right Shift (B) / Z (Y).
 
 Arriving in a room, its intended view (`initial_yaw`) is placed **wherever you
 are facing** — the room (panorama and hotspots together) is turned to you, the

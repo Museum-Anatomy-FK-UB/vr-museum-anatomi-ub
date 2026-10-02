@@ -174,6 +174,9 @@ export function registerXrPointer() {
       for (const h of hits) {
         if (!isShown(h.object)) continue;
         const el = clickableRoot(h.object);
+        // UI switched to pass-through (data-ray-off, e.g. the VR menu while the
+        // visitor isn't looking at it): let the laser carry on to what's behind.
+        if (el && el.closest('[data-ray-off]')) continue;
         if (el) return { el, distance: h.distance };
       }
       return null;

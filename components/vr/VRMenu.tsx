@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SceneSummary } from '@/lib/types/tour';
 import {
   CardPlane,
@@ -19,10 +19,12 @@ import {
 // hotspots) live on a bar floating BELOW the visitor's line of sight. Fullscreen /
 // Mode VR make no sense inside VR, so that slot becomes "Keluar VR".
 //
-// Closed by default: only a small "Menu" button sits low (~60° down), under the
-// floor arrows (which lie ~20–49° down) so it never stands between a laser and a
-// hotspot. It opens with that button (laser + trigger, hand + pinch, or gaze) or
-// with B / Y on a controller (see xr-pointer), and closes again on navigation.
+// Closed by default: only a small "Menu" button sits low (~62° down), under the
+// floor arrows (which lie ~20–49° down). It only catches lasers while the
+// visitor's gaze is on it (see vr-menu-follow), so a laser from a hand at the hip
+// to a floor arrow — which passes right through that spot — is never blocked.
+// It opens with that button (laser + trigger, hand + pinch, or gaze) or with
+// B / Y on a controller (see xr-pointer), and closes again on navigation.
 // The open bar's background lets lasers through — only its buttons catch them.
 
 // ---- Lazy-follow placement --------------------------------------------------------
@@ -39,8 +41,14 @@ export function registerVrMenuFollow() {
   AFRAME.registerComponent('vr-menu-follow', {
     schema: {
       distance: { default: 0.8 }, // meters from the eyes — within easy laser reach
-      pitch: { default: -60 }, // degrees below the line of sight (faces the eyes)
+      pitch: { default: -62 }, // degrees below the line of sight (faces the eyes)
       threshold: { default: 40 }, // degrees of head turn before it follows
+      // The menu's own area (panel-local meters) — it takes the laser only while
+      // the visitor's GAZE falls inside it (plus a margin).
+      regionW: { default: 0.62 },
+      regionTop: { default: 0.08 },
+      regionBottom: { default: -0.08 },
+      margin: { default: 0.03 },
       smooth: { default: 220 }, // ms time-constant of the follow motion
     },
     init(this: any) {
@@ -50,6 +58,10 @@ export function registerVrMenuFollow() {
       this.target = new THREE.Vector3();
       this.quat = new THREE.Quaternion();
       this.euler = new THREE.Euler();
+      this.active = null;
+      this.inv = new THREE.Matrix4();
+      this.o = new THREE.Vector3();
+      this.d = new THREE.Vector3();
     },
     tick(this: any, _t: number, dt: number) {
       const cam = this.el.sceneEl.camera;
@@ -64,6 +76,7 @@ export function registerVrMenuFollow() {
       // start swinging the bar around on it.
       cam.getWorldQuaternion(this.quat);
       const steep = Math.abs(this.euler.setFromQuaternion(this.quat, 'YXZ').x) > 70 * DEG;
+
       if (!steep && Math.abs(diff) > this.data.threshold * DEG) this.turning = true;
       const alpha = first ? 1 : 1 - Math.exp(-(dt || 16) / this.data.smooth);
       if (this.turning) {
@@ -84,6 +97,30 @@ export function registerVrMenuFollow() {
       // Lean back by the same angle so the face points straight at the eyes
       // (entity rotation order is YXZ).
       o.rotation.set(pitch, this.yaw, 0);
+
+      // The menu sits low in front of the body — right across the path of a
+      // laser from a hand at the hip to a floor arrow. So it only catches lasers
+      // while the visitor is LOOKING AT it (gaze lands inside its area); while
+      // they look at / aim for hotspots, lasers pass straight through.
+      o.updateMatrixWorld(true);
+      this.inv.copy(o.matrixWorld).invert();
+      this.o.copy(this.head).applyMatrix4(this.inv);
+      cam.getWorldDirection(this.d);
+      this.d.add(this.head).applyMatrix4(this.inv).sub(this.o);
+      let active = false;
+      if (this.d.z < -1e-6 && this.o.z > 0) {
+        const t = -this.o.z / this.d.z;
+        const x = this.o.x + this.d.x * t;
+        const y = this.o.y + this.d.y * t;
+        const m = this.data.margin * (this.active ? 2 : 1); // hysteresis
+        active = Math.abs(x) < this.data.regionW / 2 + m && y > this.data.regionBottom - m && y < this.data.regionTop + m;
+      }
+      if (active !== this.active) {
+        this.active = active;
+        if (active) this.el.removeAttribute('data-ray-off');
+        else this.el.setAttribute('data-ray-off', '');
+        this.el.emit('vr-menu-active', { active }, false);
+      }
     },
   });
 }
@@ -226,7 +263,16 @@ function pillTexture(icon: IconName, label: string, w: number, h: number, active
   return url;
 }
 
-function MenuToggle({ open, w, h, onClick }: { open: boolean; w: number; h: number; onClick: () => void }) {
+// The clickable area is much bigger than the pill it shows: a small target this
+// low is hard to hit — with a controller held at the hip, and impossible in the
+// emulator's Play mode, whose two lasers run parallel to the view ~25cm either
+// side of center (they'd pass either side of a 20cm button). It's invisible, and
+// only catches lasers while the visitor is looking at the menu (vr-menu-follow).
+export const MENU_HIT_W = 0.62;
+export const MENU_HIT_H = 0.16;
+function MenuToggle({ open, active, w, h, onClick }: {
+  open: boolean; active: boolean; w: number; h: number; onClick: () => void;
+}) {
   const ref = useEntityClick<HTMLElement>(onClick);
   const src = useMemo(() => pillTexture(open ? 'close' : 'menu', open ? 'Tutup' : 'Menu', w, h, open), [open, w, h]);
   return (
@@ -235,13 +281,22 @@ function MenuToggle({ open, w, h, onClick }: { open: boolean; w: number; h: numb
       class="clickable"
       data-name="menu-toggle"
       vr-layer="order: 3"
-      width={w}
-      height={h}
-      src={src}
-      material="shader: flat; transparent: true"
+      width={MENU_HIT_W}
+      height={MENU_HIT_H}
+      material="shader: flat; transparent: true; opacity: 0"
       animation__enter="property: scale; startEvents: mouseenter; to: 1.1 1.1 1.1; dur: 120; easing: easeOutQuad"
       animation__leave="property: scale; startEvents: mouseleave; to: 1 1 1; dur: 120; easing: easeOutQuad"
-    />
+    >
+      <a-plane
+        vr-layer="order: 4"
+        position="0 0 0.002"
+        width={w}
+        height={h}
+        src={src}
+        // Dimmed while lasers pass through it (not looking down at it).
+        material={`shader: flat; transparent: true; opacity: ${active ? 1 : 0.55}`}
+      />
+    </a-plane>
   );
 }
 
@@ -294,14 +349,30 @@ export function VRMenuBar({
     ctx.stroke();
     return canvas.toDataURL('image/png');
   });
-  const PILL_W = 0.2;
-  const PILL_H = 0.065;
+  const PILL_W = 0.24;
+  const PILL_H = 0.075;
+  const followRef = useRef<HTMLElement>(null);
+  const [active, setActive] = useState(false);
+  useEffect(() => {
+    const el = followRef.current;
+    if (!el) return;
+    const onActive = (e: Event) => setActive(!!(e as CustomEvent).detail?.active);
+    el.addEventListener('vr-menu-active', onActive);
+    return () => el.removeEventListener('vr-menu-active', onActive);
+  }, []);
   return (
-    <a-entity vr-menu-follow="">
-      <MenuToggle open={expanded} w={PILL_W} h={PILL_H} onClick={onToggleMenu} />
+    <a-entity
+      ref={followRef}
+      // Its area grows to include the bar while the menu is open.
+      vr-menu-follow={`regionW: ${expanded ? Math.max(W, MENU_HIT_W) : MENU_HIT_W}; regionBottom: ${-MENU_HIT_H / 2}; regionTop: ${
+        expanded ? MENU_HIT_H / 2 + 0.01 + H : MENU_HIT_H / 2
+      }`}
+      data-ray-off=""
+    >
+      <MenuToggle open={expanded} active={active} w={PILL_W} h={PILL_H} onClick={onToggleMenu} />
       {expanded && (
-        // Opens just above the Menu button.
-        <a-entity position={`0 ${PILL_H / 2 + 0.02 + H / 2} 0`}>
+        // Opens just above the Menu button's (invisible, larger) hit area.
+        <a-entity position={`0 ${MENU_HIT_H / 2 + 0.01 + H / 2} 0`}>
           <CardPlane src={bg} width={W} height={H} blocking={false} />
           {items.map((it, i) => (
             <IconButton
