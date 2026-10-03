@@ -134,7 +134,11 @@ headset is shared by many visitors), once per session: going back to the Main
 Location doesn't repeat it. *Lewati* skips it and the menu's
 **Panduan** button reopens it. Wording lives in `lib/vrGuide.ts`; the recording
 script and file names are in [docs/VR-GUIDE-VOICEOVER.md](docs/VR-GUIDE-VOICEOVER.md)
-and the MP3s go in `public/audio/guide/` (steps without a file play silently).
+and the MP3s are in `public/audio/guide/` (steps without a file play silently).
+The voice-over is **spatial audio**: it is heard coming from the guide panel
+(Web Audio HRTF panner placed at the panel, listener following the headset), so
+it stays put as the visitor turns — turning away puts it behind them, which
+draws them back to the panel.
 
 The menu (Main Location, All Location, Denah, Show/Hide Hotspot, Panduan, Keluar VR —
 the same actions as the 2D footer bar) is **closed by default**. A small

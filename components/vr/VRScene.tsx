@@ -29,7 +29,7 @@ import {
   type VRNoticeAction,
 } from './VRPanels';
 import { registerVrMenuFollow, VRFloorplanPanel, VRLocationsPanel, VRMenuBar } from './VRMenu';
-import { primeGuideAudio, registerVrGuideArt, stopGuideAudio, VRGuidePanel } from './VRGuide';
+import { primeGuideAudio, registerVrGuideArt, registerVrGuideVoice, stopGuideAudio, VRGuidePanel } from './VRGuide';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -253,6 +253,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerVrLayer();
       registerVrMenuFollow();
       registerVrGuideArt();
+      registerVrGuideVoice();
       registerVrHandStyle();
       if (mounted) setReady(true);
     });

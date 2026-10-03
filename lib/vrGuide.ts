@@ -29,7 +29,7 @@ export interface GuideStep {
   title: string;
   text: string;
   voiceOver: string;
-  /** File name inside public/audio/guide/ */
+  /** File path inside public/audio/guide/ (case-sensitive on the server) */
   audio: string;
   art: GuideArt;
 }
@@ -46,7 +46,7 @@ const intro: GuideStep = {
     'Selamat datang di Virtual Museum Anatomi Fakultas Kedokteran Universitas Brawijaya. ' +
     'Sebelum mulai menjelajah, ikuti panduan singkat ini untuk mengenal cara menggunakan mode VR. ' +
     'Pilih tombol Berikutnya untuk melanjutkan, atau pilih Lewati jika Anda sudah terbiasa.',
-  audio: '01-intro.mp3',
+  audio: '01-intro.MP3',
   art: 'welcome',
 };
 
@@ -57,7 +57,7 @@ const look: GuideStep = {
   voiceOver:
     'Untuk melihat sekeliling, cukup putar kepala atau badan Anda ke arah mana pun. ' +
     'Anda dapat melihat seluruh ruangan tiga ratus enam puluh derajat tanpa perlu menekan tombol apa pun.',
-  audio: '02-look.mp3',
+  audio: '02-look.MP3',
   art: 'look',
 };
 
@@ -77,7 +77,7 @@ const controllerSteps: GuideStep[] = [
       'Sinar laser keluar dari ujung setiap controller. Arahkan laser ke objek yang ingin Anda pilih, ' +
       'lalu tekan tombol trigger, yaitu tombol di bawah jari telunjuk Anda. ' +
       'Objek yang sedang dibidik akan sedikit membesar, dan lasernya berubah menjadi kuning.',
-    audio: 'controller-03-select.mp3',
+    audio: 'controller/controller-03-select.MP3',
     art: 'controller-select',
   },
   {
@@ -90,7 +90,7 @@ const controllerSteps: GuideStep[] = [
       'Ikon panah yang ada di lantai adalah jalan menuju ruangan berikutnya. ' +
       'Bidik panah tersebut dengan laser, lalu tekan trigger. ' +
       'Anda akan berpindah ke ruangan baru, dan pandangan Anda langsung menghadap ke arah yang tepat.',
-    audio: 'controller-04-move.mp3',
+    audio: 'controller/controller-04-move.MP3',
     art: 'controller-move',
   },
   {
@@ -103,7 +103,7 @@ const controllerSteps: GuideStep[] = [
       'Ikon bertanda huruf i menyimpan informasi tentang koleksi anatomi, berupa foto, penjelasan, dan rekaman suara. ' +
       'Bidik ikon tersebut, lalu tekan trigger untuk membuka panelnya. ' +
       'Setelah selesai, pilih tombol Tutup.',
-    audio: 'controller-05-info.mp3',
+    audio: 'controller/controller-05-info.MP3',
     art: 'controller-info',
   },
   {
@@ -114,7 +114,7 @@ const controllerSteps: GuideStep[] = [
       'Untuk membuka menu, tekan tombol B atau tombol Y pada controller. ' +
       'Anda juga dapat membidik tombol Menu yang melayang di atas controller kiri. ' +
       MENU_ITEMS_VO,
-    audio: 'controller-06-menu.mp3',
+    audio: 'controller/controller-06-menu.MP3',
     art: 'controller-menu',
   },
   {
@@ -127,7 +127,7 @@ const controllerSteps: GuideStep[] = [
       'Untuk keluar dari mode VR, pilih Keluar VR pada menu, atau tekan tombol Meta pada controller kanan. ' +
       'Panduan ini dapat dibuka kembali kapan saja melalui menu Panduan. ' +
       'Selamat menjelajahi Museum Anatomi Fakultas Kedokteran Universitas Brawijaya!',
-    audio: 'controller-07-finish.mp3',
+    audio: 'controller/controller-07-finish.MP3',
     art: 'controller-finish',
   },
 ];
@@ -144,7 +144,7 @@ const handSteps: GuideStep[] = [
       'Arahkan laser ke objek yang ingin Anda pilih, lalu lakukan gerakan mencubit, ' +
       'yaitu mempertemukan ujung ibu jari dengan ujung jari telunjuk. ' +
       'Objek yang sedang dibidik akan sedikit membesar, dan lasernya berubah menjadi kuning.',
-    audio: 'hand-03-select.mp3',
+    audio: 'hand/hand-03-select.MP3',
     art: 'hand-select',
   },
   {
@@ -157,7 +157,7 @@ const handSteps: GuideStep[] = [
       'Ikon panah yang ada di lantai adalah jalan menuju ruangan berikutnya. ' +
       'Arahkan laser ke panah tersebut, lalu lakukan gerakan mencubit. ' +
       'Anda akan berpindah ke ruangan baru, dan pandangan Anda langsung menghadap ke arah yang tepat.',
-    audio: 'hand-04-move.mp3',
+    audio: 'hand/hand-04-move.MP3',
     art: 'hand-move',
   },
   {
@@ -171,7 +171,7 @@ const handSteps: GuideStep[] = [
       'Arahkan laser ke ikon tersebut lalu cubit untuk membuka panelnya. ' +
       'Saat menggunakan tangan, panel akan muncul dekat dengan Anda, ' +
       'dan tombol-tombolnya bisa langsung Anda sentuh dengan ujung jari telunjuk, seperti menekan tombol sungguhan.',
-    audio: 'hand-05-info.mp3',
+    audio: 'hand/hand-05-info.MP3',
     art: 'hand-info',
   },
   {
@@ -182,7 +182,7 @@ const handSteps: GuideStep[] = [
       'Untuk membuka menu, angkat tangan kiri Anda. Tombol Menu akan melayang di atas tangan kiri. ' +
       'Sentuh tombol tersebut dengan ujung jari telunjuk kanan. ' +
       MENU_ITEMS_VO,
-    audio: 'hand-06-menu.mp3',
+    audio: 'hand/hand-06-menu.MP3',
     art: 'hand-menu',
   },
   {
@@ -196,7 +196,7 @@ const handSteps: GuideStep[] = [
       'lalu cubit ikon Meta yang muncul. ' +
       'Panduan ini dapat dibuka kembali kapan saja melalui menu Panduan. ' +
       'Selamat menjelajahi Museum Anatomi Fakultas Kedokteran Universitas Brawijaya!',
-    audio: 'hand-07-finish.mp3',
+    audio: 'hand/hand-07-finish.MP3',
     art: 'hand-finish',
   },
 ];

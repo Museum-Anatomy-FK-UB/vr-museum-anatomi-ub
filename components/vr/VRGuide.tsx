@@ -76,34 +76,127 @@ export function registerVrGuideArt() {
 }
 
 // ---- Voice-over --------------------------------------------------------------------
-// One shared <audio>: unlocked by the "Mode VR" click (a user gesture), so later
-// steps can play without the browser's autoplay block. A missing file (not
-// recorded yet) just stays silent.
-let guideAudioEl: HTMLAudioElement | null = null;
+// The narration comes *from the panel*: it plays through a Web Audio HRTF panner
+// placed at the panel and heard from the headset's pose (spatial audio), so it
+// stays put in the room as the visitor turns — turning away makes it come from
+// behind, drawing them back to the panel. Distance barely changes the volume
+// (panels sit 0.6–1.8 m away; clarity matters more than realism).
+//
+// Both the <audio> elements and the AudioContext are unlocked by the "Mode VR"
+// click (a user gesture), so later steps can play without the autoplay block.
+// If Web Audio isn't available or isn't running, a plain <audio> is used
+// instead (non-spatial). A missing file just stays silent.
 const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+let plainEl: HTMLAudioElement | null = null;
+let spatial: { ctx: AudioContext; el: HTMLAudioElement; panner: PannerNode } | null = null;
+
+function createSpatialVoice() {
+  const Ctx =
+    window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return null;
+  const ctx = new Ctx();
+  const el = new Audio();
+  el.preload = 'auto';
+  const panner = ctx.createPanner();
+  panner.panningModel = 'HRTF';
+  panner.distanceModel = 'inverse';
+  panner.refDistance = 2; // full volume within 2 m …
+  panner.rolloffFactor = 0.5; // … and only gently quieter beyond
+  // A voice is a point source: fold the (stereo) recording to mono before
+  // placing it, so it doesn't keep a fixed left/right of its own.
+  panner.channelCount = 1;
+  panner.channelCountMode = 'explicit';
+  ctx.createMediaElementSource(el).connect(panner).connect(ctx.destination);
+  return { ctx, el, panner };
+}
 
 export function primeGuideAudio() {
   try {
-    guideAudioEl ??= new Audio();
-    guideAudioEl.src = SILENT_WAV;
-    guideAudioEl.play().catch(() => {});
+    plainEl ??= new Audio();
+    plainEl.src = SILENT_WAV;
+    plainEl.play().catch(() => {});
+    spatial ??= createSpatialVoice();
+    if (spatial) {
+      spatial.ctx.resume().catch(() => {});
+      spatial.el.src = SILENT_WAV;
+      spatial.el.play().catch(() => {});
+    }
   } catch {
     /* best-effort */
   }
 }
+
+/** The element to play through: spatial when its AudioContext is running (an
+ *  element routed into a suspended context would be silent). */
+function voiceEl(): HTMLAudioElement {
+  if (spatial?.ctx.state === 'running') return spatial.el;
+  plainEl ??= new Audio();
+  return plainEl;
+}
+
 function playGuideAudio(file: string) {
   try {
-    guideAudioEl ??= new Audio();
-    guideAudioEl.pause();
-    guideAudioEl.src = GUIDE_AUDIO_BASE + file;
-    guideAudioEl.currentTime = 0;
-    guideAudioEl.play().catch(() => {});
+    stopGuideAudio();
+    const el = voiceEl();
+    el.src = GUIDE_AUDIO_BASE + file;
+    el.currentTime = 0;
+    el.play().catch(() => {});
   } catch {
     /* best-effort */
   }
 }
 export function stopGuideAudio() {
-  guideAudioEl?.pause();
+  plainEl?.pause();
+  spatial?.el.pause();
+}
+
+/** Puts the voice at this entity (the panel) and the listener at the headset,
+ *  every frame. */
+export function registerVrGuideVoice() {
+  const AFRAME = (window as unknown as { AFRAME?: any }).AFRAME;
+  if (!AFRAME || AFRAME.components['vr-guide-voice']) return;
+  const THREE = AFRAME.THREE;
+  const pos = new THREE.Vector3();
+  const head = new THREE.Vector3();
+  const quat = new THREE.Quaternion();
+  const fwd = new THREE.Vector3();
+  const up = new THREE.Vector3();
+  // Short glide between frame updates: no zipper noise as the head moves.
+  const set = (param: AudioParam, value: number, t: number) => param.setTargetAtTime(value, t, 0.02);
+  AFRAME.registerComponent('vr-guide-voice', {
+    tick(this: any) {
+      const cam = this.el.sceneEl?.camera;
+      if (spatial?.ctx.state !== 'running' || !cam) return;
+      const { ctx, panner } = spatial;
+      const t = ctx.currentTime;
+      this.el.object3D.getWorldPosition(pos);
+      cam.getWorldPosition(head);
+      cam.getWorldQuaternion(quat);
+      fwd.set(0, 0, -1).applyQuaternion(quat);
+      up.set(0, 1, 0).applyQuaternion(quat);
+      const l = ctx.listener as AudioListener & { positionX?: AudioParam };
+      if (panner.positionX && l.positionX) {
+        set(panner.positionX, pos.x, t);
+        set(panner.positionY, pos.y, t);
+        set(panner.positionZ, pos.z, t);
+        set(l.positionX, head.x, t);
+        set(l.positionY, head.y, t);
+        set(l.positionZ, head.z, t);
+        set(l.forwardX, fwd.x, t);
+        set(l.forwardY, fwd.y, t);
+        set(l.forwardZ, fwd.z, t);
+        set(l.upX, up.x, t);
+        set(l.upY, up.y, t);
+        set(l.upZ, up.z, t);
+      } else {
+        // Older Web Audio: the deprecated setters.
+        (panner as any).setPosition(pos.x, pos.y, pos.z);
+        (l as any).setPosition(head.x, head.y, head.z);
+        (l as any).setOrientation(fwd.x, fwd.y, fwd.z, up.x, up.y, up.z);
+      }
+    },
+  });
 }
 
 // ---- Panel ---------------------------------------------------------------------------
@@ -179,6 +272,8 @@ export function VRGuidePanel({ onClose }: { onClose: () => void }) {
   return (
     <PanelRoot placement={{ distance: 1.8, drop: 0.12 }}>
       <CanvasPlane width={W} height={H} version={version} draw={draw} />
+      {/* the voice-over is heard from here — the middle of the panel */}
+      <a-entity vr-guide-voice="" />
       {/* animated illustration */}
       <a-plane
         vr-guide-art={`art: ${step.art}`}
