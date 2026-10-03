@@ -205,22 +205,3 @@ const handSteps: GuideStep[] = [
 export function guideSteps(mode: GuideMode): GuideStep[] {
   return [intro, look, ...(mode === 'hand' ? handSteps : controllerSteps)];
 }
-
-// "Shown once per visit" — the guide opens by itself the first time the visitor
-// is at the Main Location in VR, and stays closed after that (until the tab is
-// reopened). It can always be reopened from the VR menu.
-const SEEN_KEY = 'vr-guide-seen';
-export function guideSeen(): boolean {
-  try {
-    return window.sessionStorage.getItem(SEEN_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-export function markGuideSeen(): void {
-  try {
-    window.sessionStorage.setItem(SEEN_KEY, '1');
-  } catch {
-    /* best-effort */
-  }
-}

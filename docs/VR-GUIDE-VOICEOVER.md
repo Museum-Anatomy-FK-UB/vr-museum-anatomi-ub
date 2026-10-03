@@ -1,6 +1,6 @@
 # Naskah Voice Over — Panduan Mode VR
 
-Panduan ini muncul otomatis saat pengunjung masuk Mode VR di **Main Location** (sekali per kunjungan), dan bisa dibuka lagi dari menu VR → **Panduan**. Ada dua jalur: **Mode Controller** dan **Mode Tangan**; langkah 1–2 sama untuk keduanya.
+Panduan ini muncul otomatis saat pengunjung masuk Mode VR di **Main Location** (setiap kali Mode VR dimulai — sekali per sesi VR, tidak diulang saat kembali ke Main Location di sesi yang sama), dan bisa dibuka lagi dari menu VR → **Panduan**. Ada dua jalur: **Mode Controller** dan **Mode Tangan**; langkah 1–2 sama untuk keduanya.
 
 ## Cara menyerahkan rekaman
 

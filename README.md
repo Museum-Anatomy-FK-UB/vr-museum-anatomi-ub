@@ -129,7 +129,9 @@ Inside the headset:
 Location, a step-by-step tutorial opens in front of the visitor: an animated
 illustration, short text and a recorded voice-over per step, in a **controller**
 track and a **hand-tracking** track (it follows whichever is in use and can be
-switched). It shows once per visit; *Lewati* skips it and the menu's
+switched). It opens in **every VR session** (each press of "Mode VR" — the
+headset is shared by many visitors), once per session: going back to the Main
+Location doesn't repeat it. *Lewati* skips it and the menu's
 **Panduan** button reopens it. Wording lives in `lib/vrGuide.ts`; the recording
 script and file names are in [docs/VR-GUIDE-VOICEOVER.md](docs/VR-GUIDE-VOICEOVER.md)
 and the MP3s go in `public/audio/guide/` (steps without a file play silently).

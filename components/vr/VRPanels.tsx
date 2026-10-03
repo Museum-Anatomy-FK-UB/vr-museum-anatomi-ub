@@ -224,34 +224,51 @@ export function usingHands(): boolean {
 }
 
 /** Where to put a panel: straight ahead of wherever the visitor is looking (level). */
-function usePanelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {}) {
-  const [pose] = useState(() => {
-    const THREE = (window as unknown as { AFRAME?: any }).AFRAME?.THREE;
-    const cam = (document.querySelector('a-scene') as unknown as { camera?: any } | null)?.camera;
-    let scale = 1;
-    if (usingHands() && distance > REACH_DISTANCE) {
-      scale = REACH_DISTANCE / distance;
-      distance = REACH_DISTANCE;
-      drop = Math.max(REACH_DROP, drop * scale);
-      tilt = Math.max(REACH_TILT, tilt);
-    }
-    const scaleAttr = `${scale} ${scale} ${scale}`;
-    if (!THREE || !cam) return { position: `0 ${-drop} -${distance}`, rotation: `${-tilt} 0 0`, scale: scaleAttr };
-    const pos = new THREE.Vector3();
-    cam.getWorldPosition(pos);
-    // Yaw from a YXZ decomposition stays well-defined while looking far down
-    // (e.g. at the menu bar), where a flattened view vector would be ~zero.
-    const yaw = headYaw(cam, THREE);
-    const dir = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
-    const p = pos.clone().addScaledVector(dir, distance);
-    const yawDeg = (yaw * 180) / Math.PI;
-    return {
-      position: `${p.x.toFixed(3)} ${(pos.y - drop).toFixed(3)} ${p.z.toFixed(3)}`,
-      // A-Frame applies rotation in YXZ order: face the visitor, then lean back.
-      rotation: `${-tilt} ${yawDeg.toFixed(2)} 0`,
-      scale: scaleAttr,
-    };
-  });
+function panelPose({ distance = 2, drop = 0.1, tilt = 0 }: PanelPlacement = {}) {
+  const THREE = (window as unknown as { AFRAME?: any }).AFRAME?.THREE;
+  const cam = (document.querySelector('a-scene') as unknown as { camera?: any } | null)?.camera;
+  const hands = usingHands();
+  let scale = 1;
+  if (hands && distance > REACH_DISTANCE) {
+    scale = REACH_DISTANCE / distance;
+    distance = REACH_DISTANCE;
+    drop = Math.max(REACH_DROP, drop * scale);
+    tilt = Math.max(REACH_TILT, tilt);
+  }
+  const scaleAttr = `${scale} ${scale} ${scale}`;
+  if (!THREE || !cam) return { hands, position: `0 ${-drop} -${distance}`, rotation: `${-tilt} 0 0`, scale: scaleAttr };
+  const pos = new THREE.Vector3();
+  cam.getWorldPosition(pos);
+  // Yaw from a YXZ decomposition stays well-defined while looking far down
+  // (e.g. at the menu bar), where a flattened view vector would be ~zero.
+  const yaw = headYaw(cam, THREE);
+  const dir = new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw));
+  const p = pos.clone().addScaledVector(dir, distance);
+  const yawDeg = (yaw * 180) / Math.PI;
+  return {
+    hands,
+    position: `${p.x.toFixed(3)} ${(pos.y - drop).toFixed(3)} ${p.z.toFixed(3)}`,
+    // A-Frame applies rotation in YXZ order: face the visitor, then lean back.
+    rotation: `${-tilt} ${yawDeg.toFixed(2)} 0`,
+    scale: scaleAttr,
+  };
+}
+
+/** The panel's pose, fixed once placed — except that switching between
+ *  controllers and hands places it again (within reach for fingertips, or back
+ *  at its normal distance). Hands are often reported a moment after a session
+ *  starts, so a panel opened right away (the guide) would otherwise stay far. */
+function usePanelPose(placement?: PanelPlacement) {
+  const [pose, setPose] = useState(() => panelPose(placement));
+  const placementRef = useRef(placement);
+  placementRef.current = placement;
+  useEffect(() => {
+    const session = (document.querySelector('a-scene') as unknown as { xrSession?: EventTarget } | null)?.xrSession;
+    if (!session) return;
+    const onChange = () => setPose((cur) => (usingHands() === cur.hands ? cur : panelPose(placementRef.current)));
+    session.addEventListener('inputsourceschange', onChange);
+    return () => session.removeEventListener('inputsourceschange', onChange);
+  }, []);
   return pose;
 }
 

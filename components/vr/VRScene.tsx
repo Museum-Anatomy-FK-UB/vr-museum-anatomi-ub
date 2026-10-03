@@ -30,7 +30,6 @@ import {
 } from './VRPanels';
 import { registerVrMenuFollow, VRFloorplanPanel, VRLocationsPanel, VRMenuBar } from './VRMenu';
 import { primeGuideAudio, registerVrGuideArt, stopGuideAudio, VRGuidePanel } from './VRGuide';
-import { guideSeen, markGuideSeen } from '@/lib/vrGuide';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -203,9 +202,18 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const worldYawRef = useRef(0);
   // VR menu bar: closed (just the small "Menu" button) unless opened.
   const [vrMenuOpen, setVrMenuOpen] = useState(false);
-  // VR guide (tutorial) — opens by itself the first time the visitor is at the
-  // Main Location in VR; reopenable from the VR menu ("Panduan").
+  // VR guide (tutorial) — opens by itself in every VR session, the first time
+  // the visitor is at the Main Location (the headset is shared by many museum
+  // visitors, each starting their own session). Within a session it's offered
+  // once, so going back to the Main Location doesn't bring it up again; the VR
+  // menu ("Panduan") reopens it any time.
   const [guideOpen, setGuideOpen] = useState(false);
+  const guideOfferedRef = useRef(false);
+  const offerGuide = () => {
+    if (guideOfferedRef.current) return;
+    guideOfferedRef.current = true;
+    setGuideOpen(true);
+  };
   // Small on-screen message (outside VR), optionally with a link to open.
   const [toast, setToast] = useState<{ message: string; href?: string; newTab?: boolean } | null>(null);
 
@@ -294,9 +302,11 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setInVR(true);
       setToast(null);
       setVrMenuOpen(false);
-      // Starting VR at the Main Location: show the guide first (once per visit).
+      // A new VR session (new visitor, or the same one after a refresh/exit):
+      // starting at the Main Location shows the guide first.
+      guideOfferedRef.current = false;
       const main = sceneListRef.current[0]?.id;
-      if (main && activeSceneRef.current?.id === main && !guideSeen()) setGuideOpen(true);
+      if (main && activeSceneRef.current?.id === main) offerGuide();
       // The little-planet intro is a flat quad sized to the 2D camera — it has no
       // meaning in stereo, so jump straight to the room if it's still playing.
       (planetRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
@@ -307,7 +317,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setInVR(false);
       setVrNotice(null);
       setVrMenuOpen(false);
-      setGuideOpen(false); // VR-only; it's offered again next time if not finished
+      setGuideOpen(false); // VR-only; offered again in the next VR session
       stopGuideAudio();
       // Back in 2D: undo the VR-only room turn and land on the room's intended
       // view, exactly as after a 2D navigation.
@@ -534,8 +544,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setWorldYaw(yawOffset);
       setActiveScene(next);
       window.history.replaceState(null, '', `/vr/${next.id}`);
-      // First arrival at the Main Location in VR: show the guide (once per visit).
-      if (isImmersive() && next.id === sceneListRef.current[0]?.id && !guideSeen()) setGuideOpen(true);
+      // VR started elsewhere: show the guide on the first arrival at the Main Location.
+      if (isImmersive() && next.id === sceneListRef.current[0]?.id) offerGuide();
 
       await blend;
     } finally {
@@ -712,7 +722,6 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     setGuideOpen(false);
   };
   const closeGuide = () => {
-    markGuideSeen();
     stopGuideAudio();
     setGuideOpen(false);
   };
