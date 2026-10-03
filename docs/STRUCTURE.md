@@ -26,6 +26,8 @@ vr-museum-anatomi-ub/
 │   │   ├── VRPanels.tsx        # In-headset info/photo/notice panels (VR mode)
 │   │   ├── xrPointer.ts        # Controller/hand lasers, trigger/pinch & gaze input (VR mode)
 │   │   ├── VRMenu.tsx          # In-headset menu bar, All Location & Denah panels (VR mode)
+│   │   ├── VRGuide.tsx         # In-headset tutorial panel + voice-over playback (VR mode)
+│   │   ├── guideArt.ts         # Canvas-drawn animations for the tutorial steps
 │   │   └── VRModeButton.tsx    # WebXR / Cardboard toggle
 │   └── ui/                 # Generic UI components (no A-Frame)
 │       ├── AudioPlayer.tsx     # Voice-over player
@@ -35,6 +37,7 @@ vr-museum-anatomi-ub/
 │
 ├── lib/
 │   ├── api.ts              # All fetch functions to the backend API
+│   ├── vrGuide.ts          # VR tutorial content: step text, voice-over script, audio file names
 │   ├── types/
 │   │   ├── tour.ts         # Types: Scene, Hotspot, NavHotspot, InfoHotspot
 │   │   └── collection.ts   # Types: Collection, Photo, Audio
@@ -44,10 +47,12 @@ vr-museum-anatomi-ub/
 │
 ├── public/
 │   ├── panorama/           # Local 360° photos for testing (see its README)
+│   ├── audio/guide/        # Recorded voice-over for the VR tutorial (see its README)
 │   └── icons/              # UI icons (hotspots, navigation, etc.)
 │
 ├── docs/                   # Technical documentation
 │   ├── STRUCTURE.md        # This file
+│   ├── VR-GUIDE-VOICEOVER.md # Recording script for the VR tutorial voice-over
 │   └── API.md              # API endpoint contract
 │
 ├── CLAUDE.md               # Project context for the AI assistant

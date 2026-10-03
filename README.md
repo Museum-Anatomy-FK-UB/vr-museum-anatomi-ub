@@ -125,7 +125,16 @@ Inside the headset:
 | Hand tracking | laser from the hand | pinch |
 | No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
 
-The menu (Main Location, All Location, Denah, Show/Hide Hotspot, Keluar VR —
+**Guide (Panduan).** When VR starts at — or first arrives at — the Main
+Location, a step-by-step tutorial opens in front of the visitor: an animated
+illustration, short text and a recorded voice-over per step, in a **controller**
+track and a **hand-tracking** track (it follows whichever is in use and can be
+switched). It shows once per visit; *Lewati* skips it and the menu's
+**Panduan** button reopens it. Wording lives in `lib/vrGuide.ts`; the recording
+script and file names are in [docs/VR-GUIDE-VOICEOVER.md](docs/VR-GUIDE-VOICEOVER.md)
+and the MP3s go in `public/audio/guide/` (steps without a file play silently).
+
+The menu (Main Location, All Location, Denah, Show/Hide Hotspot, Panduan, Keluar VR —
 the same actions as the 2D footer bar) is **closed by default**. A small
 **Menu** button floats just above the **left controller / left hand** (like a
 Quest wrist menu), so it is always within reach and never in front of a

@@ -29,6 +29,8 @@ import {
   type VRNoticeAction,
 } from './VRPanels';
 import { registerVrMenuFollow, VRFloorplanPanel, VRLocationsPanel, VRMenuBar } from './VRMenu';
+import { primeGuideAudio, registerVrGuideArt, stopGuideAudio, VRGuidePanel } from './VRGuide';
+import { guideSeen, markGuideSeen } from '@/lib/vrGuide';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -175,6 +177,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [ready, setReady] = useState(false);
   const [activeScene, setActiveScene] = useState<Scene | null>(null);
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);
+  const sceneListRef = useRef<SceneSummary[]>([]);
+  sceneListRef.current = sceneList;
   const [loadError, setLoadError] = useState(false);
   const [covered, setCovered] = useState(true); // initial black overlay (for the intro reveal)
   const [coverDuration, setCoverDuration] = useState(750);
@@ -199,6 +203,9 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const worldYawRef = useRef(0);
   // VR menu bar: closed (just the small "Menu" button) unless opened.
   const [vrMenuOpen, setVrMenuOpen] = useState(false);
+  // VR guide (tutorial) — opens by itself the first time the visitor is at the
+  // Main Location in VR; reopenable from the VR menu ("Panduan").
+  const [guideOpen, setGuideOpen] = useState(false);
   // Small on-screen message (outside VR), optionally with a link to open.
   const [toast, setToast] = useState<{ message: string; href?: string; newTab?: boolean } | null>(null);
 
@@ -237,6 +244,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerXrPointer();
       registerVrLayer();
       registerVrMenuFollow();
+      registerVrGuideArt();
       registerVrHandStyle();
       if (mounted) setReady(true);
     });
@@ -286,6 +294,9 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setInVR(true);
       setToast(null);
       setVrMenuOpen(false);
+      // Starting VR at the Main Location: show the guide first (once per visit).
+      const main = sceneListRef.current[0]?.id;
+      if (main && activeSceneRef.current?.id === main && !guideSeen()) setGuideOpen(true);
       // The little-planet intro is a flat quad sized to the 2D camera — it has no
       // meaning in stereo, so jump straight to the room if it's still playing.
       (planetRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
@@ -296,6 +307,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setInVR(false);
       setVrNotice(null);
       setVrMenuOpen(false);
+      setGuideOpen(false); // VR-only; it's offered again next time if not finished
+      stopGuideAudio();
       // Back in 2D: undo the VR-only room turn and land on the room's intended
       // view, exactly as after a 2D navigation.
       const scene = activeSceneRef.current;
@@ -483,6 +496,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         setGalleryOpen(false);
         setFloorplanOpen(false);
         setVrMenuOpen(false);
+        setGuideOpen(false);
       }
 
       // Old hotspots shrink out (220ms)
@@ -520,6 +534,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       setWorldYaw(yawOffset);
       setActiveScene(next);
       window.history.replaceState(null, '', `/vr/${next.id}`);
+      // First arrival at the Main Location in VR: show the guide (once per visit).
+      if (isImmersive() && next.id === sceneListRef.current[0]?.id && !guideSeen()) setGuideOpen(true);
 
       await blend;
     } finally {
@@ -540,6 +556,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const enterVR = useCallback(async () => {
     const sceneEl = getSceneEl();
     if (!sceneEl || sceneEl.is('vr-mode')) return;
+    // Still inside the click: unlock audio so the guide's voice-over can play.
+    primeGuideAudio();
     const reason = await vrUnavailableReason();
     if (reason) {
       setToast({ message: reason });
@@ -691,6 +709,12 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     setVrNotice(null);
     setGalleryOpen(false);
     setFloorplanOpen(false);
+    setGuideOpen(false);
+  };
+  const closeGuide = () => {
+    markGuideSeen();
+    stopGuideAudio();
+    setGuideOpen(false);
   };
 
   return (
@@ -756,8 +780,14 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
               key={activeScene.id}
               hotspots={visibleHotspots}
               onNavigate={navigateTo}
-              onInfo={setActiveCollectionId}
-              onPhoto={setActivePhotoHotspot}
+              onInfo={(id) => {
+                if (guideOpen) closeGuide();
+                setActiveCollectionId(id);
+              }}
+              onPhoto={(h) => {
+                if (guideOpen) closeGuide();
+                setActivePhotoHotspot(h);
+              }}
               onExternalLink={openExternal}
             />
           )}
@@ -791,6 +821,8 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
             />
           ) : vrNotice ? (
             <VRNoticePanel key={JSON.stringify(vrNotice)} {...vrNoticeContent(vrNotice)} />
+          ) : guideOpen ? (
+            <VRGuidePanel onClose={closeGuide} />
           ) : activePhotoHotspot ? (
             <VRPhotoPanel
               key={activePhotoHotspot.id}
@@ -833,7 +865,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
             expanded={vrMenuOpen}
             onToggleMenu={() => setVrMenuOpen((v) => !v)}
             hotspotsVisible={hotspotsVisible}
-            open={galleryOpen ? 'locations' : floorplanOpen ? 'floorplan' : null}
+            open={guideOpen ? 'guide' : galleryOpen ? 'locations' : floorplanOpen ? 'floorplan' : null}
             onMainLocation={() => {
               if (mainSceneId) navigateTo(mainSceneId);
             }}
@@ -852,6 +884,12 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
               setVrMenuOpen(false);
             }}
             onToggleHotspots={() => setHotspotsVisible((v) => !v)}
+            onGuide={() => {
+              const opening = !guideOpen;
+              closeVrPanels();
+              setGuideOpen(opening);
+              setVrMenuOpen(false);
+            }}
             onExitVR={() => getSceneEl()?.exitVR()}
           />
         )}

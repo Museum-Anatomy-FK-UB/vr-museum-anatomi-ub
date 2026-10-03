@@ -16,7 +16,7 @@ import {
 
 // The footer control bar, inside the headset. HTML is invisible during an XR
 // session, so the same actions (Main Location, All Location, Denah, show/hide
-// hotspots) live on a bar floating BELOW the visitor's line of sight. Fullscreen /
+// hotspots — plus the VR guide) live on a bar floating BELOW the visitor's line of sight. Fullscreen /
 // Mode VR make no sense inside VR, so that slot becomes "Keluar VR".
 //
 // Closed by default: only a small "Menu" button, floating just above the LEFT
@@ -134,7 +134,7 @@ export function registerVrMenuFollow() {
 }
 
 // ---- Icons (same artwork as SceneControlsBar, 24×24 viewBox) --------------------
-type IconName = 'building' | 'grid' | 'map' | 'eye' | 'eye-off' | 'exit' | 'menu' | 'close';
+type IconName = 'building' | 'grid' | 'map' | 'eye' | 'eye-off' | 'exit' | 'menu' | 'close' | 'help';
 function drawIcon(ctx: CanvasRenderingContext2D, name: IconName) {
   const stroke = (d: string) => ctx.stroke(new Path2D(d));
   switch (name) {
@@ -168,6 +168,15 @@ function drawIcon(ctx: CanvasRenderingContext2D, name: IconName) {
       break;
     case 'close':
       stroke('M18 6 6 18M6 6l12 12');
+      break;
+    case 'help':
+      ctx.beginPath();
+      ctx.arc(12, 12, 9.5, 0, Math.PI * 2);
+      ctx.stroke();
+      stroke('M9.2 9.3a2.9 2.9 0 0 1 5.6 1c0 1.9-2.8 2.4-2.8 4.2');
+      ctx.beginPath();
+      ctx.arc(12, 17.6, 0.6, 0, Math.PI * 2);
+      ctx.stroke();
       break;
   }
 }
@@ -316,16 +325,18 @@ export function VRMenuBar({
   onAllLocations,
   onFloorplan,
   onToggleHotspots,
+  onGuide,
   onExitVR,
 }: {
   expanded: boolean;
   onToggleMenu: () => void;
   hotspotsVisible: boolean;
-  open: 'locations' | 'floorplan' | null;
+  open: 'locations' | 'floorplan' | 'guide' | null;
   onMainLocation: () => void;
   onAllLocations: () => void;
   onFloorplan: () => void;
   onToggleHotspots: () => void;
+  onGuide: () => void;
   onExitVR: () => void;
 }) {
   const BW = 0.115;
@@ -342,6 +353,7 @@ export function VRMenuBar({
       label: hotspotsVisible ? 'Hide Hotspot' : 'Show Hotspot',
       onClick: onToggleHotspots,
     },
+    { name: 'menu-guide', icon: 'help' as const, label: 'Panduan', onClick: onGuide, active: open === 'guide' },
     { name: 'menu-exit', icon: 'exit' as const, label: 'Keluar VR', onClick: onExitVR },
   ];
   const W = items.length * BW + (items.length - 1) * GAP + PAD * 2;
