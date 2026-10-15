@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PhotoHotspot } from '@/lib/types/tour';
 import { useCollection } from '@/lib/hooks/useCollection';
-import { login } from '@/lib/api';
+import { preload } from 'swr';
+import { getCollection, login } from '@/lib/api';
 
 // In-headset versions of the HTML overlays (HotspotInfo, HotspotPhotoModal, …).
 // An immersive WebXR session only shows the WebGL canvas — any HTML modal opened
@@ -400,7 +401,18 @@ export function VRButton({
 //      (/api/vr-image, limited to the backend's hosts) serves it as is.
 // null means nothing worked, so the panel can say so instead of loading forever.
 const VR_IMAGE_TIMEOUT_MS = 15000;
-const vrImages = new Map<string, Promise<string | null>>();
+const vrImages = new Map<string, Promise<VrPhoto | null>>();
+// Hosts whose photos failed to load directly (no CORS): later photos from them
+// skip that attempt — it downloads the full original only to be refused.
+const noCorsHosts = new Set<string>();
+
+// Request photos at the size a panel actually shows them (Next's image sizes),
+// not bigger: the info panel's photo is ~0.86 m wide = ~520 px of texture.
+const NEXT_IMAGE_WIDTHS = [384, 640, 750, 828, 1080, 1200, 1920];
+function photoWidthFor(meters: number): number {
+  const px = meters * PX_PER_M;
+  return NEXT_IMAGE_WIDTHS.find((w) => w >= px) ?? NEXT_IMAGE_WIDTHS[NEXT_IMAGE_WIDTHS.length - 1];
+}
 
 function remoteUrl(url: string): URL | null {
   try {
@@ -412,14 +424,14 @@ function remoteUrl(url: string): URL | null {
   }
 }
 
-function canLoad(src: string, timeoutMs = VR_IMAGE_TIMEOUT_MS): Promise<string | null> {
+function canLoad(src: string, timeoutMs = VR_IMAGE_TIMEOUT_MS): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous'; // the same mode the texture loader uses
+    img.crossOrigin = 'anonymous'; // required to use it as a WebGL texture
     const timer = window.setTimeout(() => resolve(null), timeoutMs);
     img.onload = () => {
       window.clearTimeout(timer);
-      resolve(src);
+      resolve(img);
     };
     img.onerror = () => {
       window.clearTimeout(timer);
@@ -430,42 +442,112 @@ function canLoad(src: string, timeoutMs = VR_IMAGE_TIMEOUT_MS): Promise<string |
 }
 
 /** The first attempt that loads, or null once all of them have failed. */
-function firstLoaded(attempts: Promise<string | null>[]): Promise<string | null> {
+function firstLoaded<T>(attempts: Promise<T | null>[]): Promise<T | null> {
   return new Promise((resolve) => {
     let left = attempts.length;
     for (const attempt of attempts) {
-      attempt.then((src) => {
-        if (src) resolve(src);
+      attempt.then((v) => {
+        if (v) resolve(v);
         else if (--left === 0) resolve(null);
       });
     }
   });
 }
 
-/** A URL for `url` that can be used as a WebGL texture, or null if none loads.
- *  `width` must be one of Next's image sizes (e.g. 384, 640, 1200). */
-export function resolveVrImage(url: string, width = 1200): Promise<string | null> {
+/** A loaded photo, ready to become a texture. `key` names it for `vr-photo`. */
+export type VrPhoto = { key: string; img: HTMLImageElement };
+const VR_PHOTO_CACHE = 48; // loaded photos kept for instant reuse (oldest dropped)
+
+/**
+ * The photo at `url`, loaded so that WebGL may use it (see above), or null if
+ * no way works. The loaded <img> element itself is kept and handed to the
+ * texture (vr-photo) — loading the URL a second time would be a separate
+ * request, which the optimizer may not answer from its cache.
+ * `width` must be one of Next's image sizes (e.g. 384, 640, 1200).
+ */
+export function loadVrImage(url: string, width = 1200): Promise<VrPhoto | null> {
   const key = `${width}|${url}`;
   let p = vrImages.get(key);
-  if (!p) {
-    p = (async () => {
-      const remote = remoteUrl(url);
-      if (!remote) return canLoad(url); // same origin: nothing to work around
+  if (p) {
+    vrImages.delete(key); // re-insert: most recently used last
+    vrImages.set(key, p);
+    return p;
+  }
+  p = (async () => {
+    const remote = remoteUrl(url);
+    let img: HTMLImageElement | null;
+    if (!remote) {
+      img = await canLoad(url); // same origin: nothing to work around
+    } else {
       const href = encodeURIComponent(remote.href);
-      const loaded =
-        (await firstLoaded([canLoad(`/_next/image?url=${href}&w=${width}&q=80`), canLoad(remote.href)])) ??
-        (await canLoad(`/api/vr-image?url=${href}`, 25000));
-      if (!loaded && process.env.NODE_ENV !== 'production') {
+      const attempts = [canLoad(`/_next/image?url=${href}&w=${width}&q=75`)];
+      if (!noCorsHosts.has(remote.host)) {
+        attempts.push(
+          canLoad(remote.href).then((loaded) => {
+            if (!loaded) noCorsHosts.add(remote.host);
+            return loaded;
+          }),
+        );
+      }
+      img = (await firstLoaded(attempts)) ?? (await canLoad(`/api/vr-image?url=${href}`, 25000));
+      if (!img && process.env.NODE_ENV !== 'production') {
         console.warn(
           `[VR] Foto tidak dapat dimuat di VR: ${remote.href} — cek di tab Network: /_next/image, /api/vr-image ` +
             '(403 = host belum diizinkan, lihat VR_IMAGE_HOSTS), atau aktifkan CORS di server foto.',
         );
       }
-      return loaded;
-    })();
-    vrImages.set(key, p);
+    }
+    if (!img) {
+      vrImages.delete(key); // let a later attempt try again
+      return null;
+    }
+    vrPhotoImages.set(key, img);
+    return { key, img };
+  })();
+  vrImages.set(key, p);
+  while (vrImages.size > VR_PHOTO_CACHE) {
+    const oldest = vrImages.keys().next().value as string;
+    vrImages.delete(oldest);
+    vrPhotoImages.delete(oldest);
   }
   return p;
+}
+
+// Loaded photos by key, for the vr-photo component.
+const vrPhotoImages = new Map<string, HTMLImageElement>();
+
+/** `vr-photo="key: …"` shows a photo loaded by loadVrImage as the entity's
+ *  texture — straight from the loaded <img>, with no second download. */
+export function registerVrPhoto() {
+  const AFRAME = (window as unknown as { AFRAME?: any }).AFRAME;
+  if (!AFRAME || AFRAME.components['vr-photo']) return;
+  const THREE = AFRAME.THREE;
+  AFRAME.registerComponent('vr-photo', {
+    schema: { key: { default: '' } },
+    update(this: any) {
+      this.texture?.dispose();
+      this.texture = null;
+      const img = vrPhotoImages.get(this.data.key);
+      if (!img) return;
+      this.texture = new THREE.Texture(img);
+      this.texture.colorSpace = THREE.SRGBColorSpace;
+      this.texture.anisotropy = this.el.sceneEl?.renderer?.capabilities?.getMaxAnisotropy?.() ?? 1;
+      this.texture.needsUpdate = true;
+    },
+    // The material component (re)creates its material on its own schedule; keep
+    // the texture on whichever material is current.
+    tick(this: any) {
+      const mesh = this.el.getObject3D('mesh');
+      if (!this.texture || !mesh?.material || mesh.material.map === this.texture) return;
+      mesh.material.map = this.texture;
+      mesh.material.needsUpdate = true;
+    },
+    remove(this: any) {
+      const mesh = this.el.getObject3D('mesh');
+      if (mesh?.material?.map === this.texture) mesh.material.map = null;
+      this.texture?.dispose();
+    },
+  });
 }
 
 // Shown where a photo should be when it can't be loaded at all — covers the
@@ -490,35 +572,18 @@ function failTexture(wM: number, hM: number): string {
 }
 
 function FittedImage({ url, x, y, maxW, maxH }: { url: string; x: number; y: number; maxW: number; maxH: number }) {
-  const ref = useRef<HTMLElement>(null);
-  // undefined: still resolving · null: can't be loaded · string: texture URL
-  const [src, setSrc] = useState<string | null | undefined>(undefined);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  // undefined: still loading · null: can't be loaded · VrPhoto: ready
+  const [photo, setPhoto] = useState<VrPhoto | null | undefined>(undefined);
   useEffect(() => {
     let alive = true;
-    setSrc(undefined);
-    resolveVrImage(url).then((resolved) => alive && setSrc(resolved));
+    setPhoto(undefined);
+    loadVrImage(url, photoWidthFor(maxW)).then((loaded) => alive && setPhoto(loaded));
     return () => {
       alive = false;
     };
-  }, [url]);
-  useEffect(() => {
-    setSize(null);
-    const el = ref.current;
-    if (!el) return;
-    const onLoad = (evt: any) => {
-      const img = evt.detail?.texture?.image;
-      const iw = img?.naturalWidth || img?.videoWidth || img?.width;
-      const ih = img?.naturalHeight || img?.videoHeight || img?.height;
-      if (!iw || !ih) return;
-      const scale = Math.min(maxW / iw, maxH / ih);
-      setSize({ w: iw * scale, h: ih * scale });
-    };
-    el.addEventListener('materialtextureloaded', onLoad);
-    return () => el.removeEventListener('materialtextureloaded', onLoad);
-  }, [src, maxW, maxH]);
-  if (src === undefined) return null; // the card's "Memuat foto…" shows meanwhile
-  if (src === null) {
+  }, [url, maxW]);
+  if (photo === undefined) return null; // the card's "Memuat foto…" shows meanwhile
+  if (photo === null) {
     return (
       <a-plane
         data-photo="failed"
@@ -531,18 +596,45 @@ function FittedImage({ url, x, y, maxW, maxH }: { url: string; x: number; y: num
       />
     );
   }
+  // Fit inside the photo area, keeping the photo's own aspect ratio.
+  const scale = Math.min(maxW / photo.img.naturalWidth, maxH / photo.img.naturalHeight);
   return (
-    <a-image
-      ref={ref}
+    <a-plane
+      key={photo.key}
+      data-photo="ok"
+      data-src={photo.img.src}
       vr-layer="order: 1"
-      src={src}
+      vr-photo={`key: ${photo.key}`}
       position={`${x} ${y} 0.005`}
-      width={size?.w ?? maxW}
-      height={size?.h ?? maxH}
-      visible={size ? 'true' : 'false'}
+      width={photo.img.naturalWidth * scale}
+      height={photo.img.naturalHeight * scale}
       material="shader: flat; transparent: true"
     />
   );
+}
+
+// ---- Prefetch (VR) ---------------------------------------------------------------
+// Collection data and photos come from a slow backend (and photos pass through
+// the image optimizer), so in the headset they are fetched ahead of the click:
+// VRScene calls these for the info/photo hotspots of the room the visitor is
+// in. Everything is cached, so the click then opens a ready panel.
+const INFO_PHOTO_W = 0.86; // VRInfoPanel's photo area (m)
+const PHOTO_PANEL_W = 1.94; // VRPhotoPanel's photo area (m)
+
+/** Collection text (the same SWR entry VRInfoPanel reads) + its first photo. */
+export async function prefetchVrCollection(collectionId: string): Promise<void> {
+  try {
+    const collection = await preload(['collection', collectionId], () => getCollection(collectionId));
+    const first = collection?.photos?.[0]?.url;
+    if (first) await loadVrImage(first, photoWidthFor(INFO_PHOTO_W));
+  } catch {
+    // best-effort: the panel loads it on open as usual
+  }
+}
+
+/** A photo hotspot's image. */
+export async function prefetchVrPhoto(url: string): Promise<void> {
+  await loadVrImage(url, photoWidthFor(PHOTO_PANEL_W));
 }
 
 // ---- Collection info ------------------------------------------------------------
@@ -570,11 +662,15 @@ export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; o
 
   const photos = collection?.photos ?? [];
   const photo = photos[Math.min(photoIndex, Math.max(0, photos.length - 1))];
+  // The other photos load in the background, so "Foto ›" shows them at once.
+  useEffect(() => {
+    for (const p of collection?.photos?.slice(1) ?? []) loadVrImage(p.url, photoWidthFor(INFO_PHOTO_W));
+  }, [collection]);
   const hasPhoto = !!photo;
 
   const W = 2.0;
   const H = 1.15;
-  const IMG_W = 0.86;
+  const IMG_W = INFO_PHOTO_W;
   const IMG_H = 0.78;
   const pad = 0.07;
 
@@ -719,7 +815,7 @@ export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; o
 export function VRPhotoPanel({ hotspot, onClose }: { hotspot: PhotoHotspot; onClose: () => void }) {
   const caption = hotspot.caption ?? hotspot.label;
   const W = 2.1;
-  const IMG_W = 1.94;
+  const IMG_W = PHOTO_PANEL_W;
   const IMG_H = 1.05;
   const pad = 0.08;
 

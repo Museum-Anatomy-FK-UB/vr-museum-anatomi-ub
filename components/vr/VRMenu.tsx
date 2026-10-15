@@ -10,7 +10,7 @@ import {
   drawCard,
   headYaw,
   newCanvas,
-  resolveVrImage,
+  loadVrImage,
   roundRect,
   useEntityClick,
 } from './VRPanels';
@@ -410,32 +410,25 @@ const thumbCache = new Map<string, Promise<string | null>>();
 function loadThumb(url: string): Promise<string | null> {
   let p = thumbCache.get(url);
   if (!p) {
-    p = new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = 'anonymous';
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          canvas.width = 384;
-          canvas.height = 192;
-          const ctx = canvas.getContext('2d')!;
-          // cover-fit
-          const scale = Math.max(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
-          const w = img.naturalWidth * scale;
-          const h = img.naturalHeight * scale;
-          ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
-          resolve(canvas.toDataURL('image/jpeg', 0.82));
-        } catch {
-          resolve(null); // tainted canvas (no CORS) — show the title only
-        }
-      };
-      img.onerror = () => resolve(null);
-      // Through the same-origin image optimizer when possible (see
-      // resolveVrImage): a storage server without CORS would taint the canvas.
-      resolveVrImage(url, 384).then((src) => {
-        if (src) img.src = src;
-        else resolve(null);
-      });
+    // Loaded through the same-origin image optimizer when possible (see
+    // loadVrImage): a storage server without CORS would taint the canvas.
+    p = loadVrImage(url, 384).then((photo) => {
+      if (!photo) return null; // show the title only
+      const { img } = photo;
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = 384;
+        canvas.height = 192;
+        const ctx = canvas.getContext('2d')!;
+        // cover-fit
+        const scale = Math.max(canvas.width / img.naturalWidth, canvas.height / img.naturalHeight);
+        const w = img.naturalWidth * scale;
+        const h = img.naturalHeight * scale;
+        ctx.drawImage(img, (canvas.width - w) / 2, (canvas.height - h) / 2, w, h);
+        return canvas.toDataURL('image/jpeg', 0.82);
+      } catch {
+        return null; // tainted canvas — show the title only
+      }
     });
     thumbCache.set(url, p);
   }

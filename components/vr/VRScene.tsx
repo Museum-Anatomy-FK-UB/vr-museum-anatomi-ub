@@ -21,7 +21,10 @@ import { registerLittlePlanetIntro } from './littlePlanetIntro';
 import { registerVrHandStyle, registerXrPointer } from './xrPointer';
 import {
   headYaw,
+  prefetchVrCollection,
+  prefetchVrPhoto,
   registerVrLayer,
+  registerVrPhoto,
   VRInfoPanel,
   VRLoginPanel,
   VRNoticePanel,
@@ -251,6 +254,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerLittlePlanetIntro();
       registerXrPointer();
       registerVrLayer();
+      registerVrPhoto();
       registerVrMenuFollow();
       registerVrGuideArt();
       registerVrGuideVoice();
@@ -356,6 +360,33 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       sceneEl.removeEventListener('vr-menu-toggle', toggleMenu);
     };
   }, [ready]);
+
+  // In the headset, get each info/photo hotspot's content ready before it is
+  // clicked (collection text + first photo — the backend and the photo
+  // optimizer can take a while). Starts once the room has settled, two at a
+  // time, and stops when the visitor moves on.
+  useEffect(() => {
+    if (!inVR) return;
+    let cancelled = false;
+    const jobs = visibleHotspots.flatMap((h) =>
+      h.type === 'info'
+        ? [() => prefetchVrCollection(h.collection_id)]
+        : h.type === 'photo'
+        ? [() => prefetchVrPhoto(h.media_url)]
+        : [],
+    );
+    const worker = async () => {
+      for (let job = jobs.shift(); job && !cancelled; job = jobs.shift()) await job();
+    };
+    const t = setTimeout(() => {
+      worker();
+      worker();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [inVR, visibleHotspots]);
 
   // The on-screen toast fades away on its own unless it carries a link to click.
   useEffect(() => {

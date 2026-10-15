@@ -4,7 +4,7 @@
 // a cross-origin image whose server sends CORS headers. When the backend's
 // storage doesn't, the headset can't show the photo at all (the 2D <img> panel
 // is unaffected — an <img> needs no CORS). Served from our own origin, the
-// photo needs no CORS. See resolveVrImage() in components/vr/VRPanels.tsx,
+// photo needs no CORS. See loadVrImage() in components/vr/VRPanels.tsx,
 // which tries this only after the image optimizer and a direct load fail.
 //
 // Not an open proxy: only the backend's own hosts (from the env) are fetched,

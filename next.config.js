@@ -8,7 +8,7 @@ const nextConfig = {
     remotePatterns: [
       { protocol: 'https', hostname: '**' },
       // Some storage servers hand out http:// URLs; the VR panels load photos
-      // through the optimizer (components/vr/VRPanels.tsx resolveVrImage).
+      // through the optimizer (components/vr/VRPanels.tsx loadVrImage).
       { protocol: 'http', hostname: '**' },
     ],
   },
