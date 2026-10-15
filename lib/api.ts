@@ -142,7 +142,7 @@ function toPhotos(list: RawPhoto[] | null | undefined): CollectionPhoto[] {
 /** The admin may store rich text: keep its paragraphs, drop the markup. */
 function plainText(value: string): string {
   if (!/<[a-z!/]/i.test(value) || typeof DOMParser === 'undefined') return value.trim();
-  const html = value.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li|h[1-6])>/gi, '\n');
+  const html = value.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|h[1-6])>/gi, '\n\n').replace(/<\/li>/gi, '\n');
   const text = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
   return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
