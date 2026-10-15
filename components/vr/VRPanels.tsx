@@ -267,6 +267,8 @@ function usePanelPose(placement?: PanelPlacement) {
     if (!session) return;
     const onChange = () => setPose((cur) => (usingHands() === cur.hands ? cur : panelPose(placementRef.current)));
     session.addEventListener('inputsourceschange', onChange);
+    // The input may already have changed between the first render and now.
+    onChange();
     return () => session.removeEventListener('inputsourceschange', onChange);
   }, []);
   return pose;
@@ -420,10 +422,16 @@ function FittedImage({ url, x, y, maxW, maxH }: { url: string; x: number; y: num
 export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; onClose: () => void }) {
   const { collection, isLoading, error } = useCollection(collectionId);
   const [photoIndex, setPhotoIndex] = useState(0);
+  // The general description can be long: it is split into pages that fit the card.
+  const [textPage, setTextPage] = useState(0);
+  const [textPages, setTextPages] = useState(1);
   const [playing, setPlaying] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => setPhotoIndex(0), [collectionId]);
+  useEffect(() => {
+    setPhotoIndex(0);
+    setTextPage(0);
+  }, [collectionId]);
   useEffect(
     () => () => {
       audioRef.current?.pause();
@@ -443,7 +451,7 @@ export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; o
   const pad = 0.07;
 
   // Card texture: re-drawn only when what it shows changes.
-  const cardKey = `${collection?.id ?? ''}|${isLoading}|${!!error}|${hasPhoto}|${photo?.caption ?? ''}|${photoIndex}/${photos.length}`;
+  const cardKey = `${collection?.id ?? ''}|${isLoading}|${!!error}|${hasPhoto}|${photo?.caption ?? ''}|${photoIndex}/${photos.length}|${textPage}`;
   const [card, setCard] = useState<{ key: string; src: string } | null>(null);
   useEffect(() => {
     const { canvas, ctx } = newCanvas(W, H);
@@ -464,11 +472,27 @@ export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; o
         blocks.push({ text: collection.latin_name, size: 24, italic: true, color: '#94a3b8', lineHeight: 32, maxLines: 1, gapAfter: 6 });
       if (collection.category)
         blocks.push({ text: collection.category.toUpperCase(), size: 20, weight: 700, color: '#fbbf24', lineHeight: 30, maxLines: 1, gapAfter: 12 });
-      blocks.push({ text: collection.description, size: 24, color: '#e2e8f0', lineHeight: 34 });
     }
     // Leave room at the bottom for the button row.
-    const laid = layoutBlocks(ctx, blocks, px(textW), px(H - pad * 2 - 0.16));
+    const textH = px(H - pad * 2 - 0.16);
+    const laid = layoutBlocks(ctx, blocks, px(textW), textH);
+    // Description: whatever room the heading leaves, one page at a time.
+    const desc: TextBlock = { text: collection && !isLoading && !error ? collection.description : '', size: 24, color: '#e2e8f0', lineHeight: 34 };
+    const descLines = layoutBlocks(ctx, [desc], px(textW)).out[0]?.lines ?? [];
+    const perPage = Math.max(1, Math.floor((textH - laid.height - 40) / desc.lineHeight));
+    const pages = Math.max(1, Math.ceil(descLines.length / perPage));
+    const page = Math.min(textPage, pages - 1);
+    const pageLines = descLines.slice(page * perPage, (page + 1) * perPage);
+    if (pageLines.length) laid.out.push({ block: desc, lines: pageLines });
     drawBlocks(ctx, laid, px(textX), px(pad + 0.02));
+    if (pages > 1) {
+      ctx.font = `600 20px ${FONT}`;
+      ctx.fillStyle = '#94a3b8';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(`Teks ${page + 1} / ${pages}`, px(textX), px(H - pad - 0.16) - 30);
+    }
+    setTextPages(pages);
 
     if (hasPhoto) {
       // Placeholder behind the photo (visible while loading or if it fails).
@@ -539,7 +563,15 @@ export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; o
             onClick={() => setPhotoIndex((i) => (i + 1) % photos.length)} />
         </>
       )}
-      {collection?.audio_url && (
+      {textPages > 1 && (
+        <>
+          <VRButton name="text-prev" label="‹ Teks" x={W / 2 - pad - 0.34 - 0.04 - 0.46} y={btnY} width={0.24}
+            onClick={() => setTextPage((p) => (p - 1 + textPages) % textPages)} />
+          <VRButton name="text-next" label="Teks ›" x={W / 2 - pad - 0.34 - 0.04 - 0.18} y={btnY} width={0.24}
+            onClick={() => setTextPage((p) => (p + 1) % textPages)} />
+        </>
+      )}
+      {collection?.audio_url && textPages <= 1 && (
         <VRButton
           key={playing ? 'pause' : 'play'}
           label={playing ? 'Jeda audio' : 'Putar audio'}

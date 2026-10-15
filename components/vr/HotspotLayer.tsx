@@ -87,13 +87,14 @@ const ARROW_DEG: Record<HotspotArrow, number> = { up: 0, right: -90, down: 180, 
 
 /**
  * The entire hotspot face — ambient glow, gradient coin, highlight, rim, and
- * icon — is baked into ONE texture per variant (info, or arrow per direction).
+ * icon — is baked into ONE texture per variant (door, photo, external link, or
+ * arrow per direction; info hotspots have their own lighter look, getInfoTexture).
  * Previously each of these was a separate mesh overlapping nearly coplanar; that
  * caused the z-fighting that made half the hotspot look cut off. With a single
  * texture on a single plane, no other mesh (besides the pulse ring) can "fight"
  * over the depth buffer.
  */
-function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door' | 'photo' | 'external_link', arrowDeg = 0): string {
+function getHotspotFaceTexture(kind: 'arrow' | 'door' | 'photo' | 'external_link', arrowDeg = 0): string {
   const key = kind === 'arrow' ? `face-arrow-${arrowDeg}` : `face-${kind}`;
   return cachedTexture(key, 256, (ctx, size) => {
     const cx = size / 2;
@@ -209,7 +210,8 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door' | 'photo' | 'exte
       ctx.closePath();
       ctx.fill();
       ctx.restore();
-    } else if (kind === 'external_link') {
+    } else {
+      // external_link
       // External-link glyph: an open box + an arrow escaping the top-right corner.
       const s = coinR * 0.5;
       ctx.lineWidth = coinR * 0.09;
@@ -234,27 +236,47 @@ function getHotspotFaceTexture(kind: 'info' | 'arrow' | 'door' | 'photo' | 'exte
       ctx.moveTo(-s * 0.25, s * 0.05);
       ctx.lineTo(s * 0.75, -s * 0.75);
       ctx.stroke();
-    } else {
-      const dotR = coinR * 0.1;
-      ctx.beginPath();
-      ctx.arc(0, -coinR * 0.32, dotR, 0, Math.PI * 2);
-      ctx.fill();
-
-      const barW = coinR * 0.2;
-      const barH = coinR * 0.48;
-      const bx = -barW / 2;
-      const by = -coinR * 0.05;
-      const rad = barW / 2;
-      ctx.beginPath();
-      ctx.moveTo(bx + rad, by);
-      ctx.arcTo(bx + barW, by, bx + barW, by + barH, rad);
-      ctx.arcTo(bx + barW, by + barH, bx, by + barH, rad);
-      ctx.arcTo(bx, by + barH, bx, by, rad);
-      ctx.arcTo(bx, by, bx + barW, by, rad);
-      ctx.closePath();
-      ctx.fill();
     }
     ctx.restore();
+  });
+}
+
+/**
+ * Info hotspots — lighter than the navigation coins: a rooms can hold many of
+ * them, each sitting right on the object it describes, so a solid dark coin
+ * would hide the very collection it points at. A see-through disc with a white
+ * rim and "i" (no ambient glow) stays readable on bright walls and dark cases
+ * alike while the object shows through. It fills more of its plane than the
+ * coin does (no glow margin), so the click target shrinks less than the look.
+ */
+function getInfoTexture(): string {
+  return cachedTexture('face-info-glass', 256, (ctx, size) => {
+    const c = size / 2;
+    const r = size * 0.42;
+    ctx.fillStyle = 'rgba(10,14,28,0.38)';
+    ctx.beginPath();
+    ctx.arc(c, c, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+    ctx.lineWidth = size * 0.034;
+    ctx.stroke();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(c, c - r * 0.36, r * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+    const w = r * 0.2;
+    const h = r * 0.5;
+    const x = c - w / 2;
+    const y = c - r * 0.12;
+    const rad = w / 2;
+    ctx.beginPath();
+    ctx.moveTo(x + rad, y);
+    ctx.arcTo(x + w, y, x + w, y + h, rad);
+    ctx.arcTo(x + w, y + h, x, y + h, rad);
+    ctx.arcTo(x, y + h, x, y, rad);
+    ctx.arcTo(x, y, x + w, y, rad);
+    ctx.closePath();
+    ctx.fill();
   });
 }
 
@@ -280,10 +302,11 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
     return () => el.removeEventListener('click', handler);
   }, [onActivate]);
 
-  // Three visual styles:
+  // Visual styles:
   // - tilted arrow: general room-to-room navigation (lies down like a floor marker)
   // - door: an UPRIGHT navigation hotspot for an entrance (variant === 'door')
-  // - info: upright collection hotspot (with a nod animation)
+  // - info: small see-through "i" disc, upright and still (see getInfoTexture)
+  // - photo / external link: upright coin with a nod animation
   const isNav = hotspot.type === 'navigation';
   const isDoor = isNav && hotspot.variant === 'door';
   const isTiltedArrow = isNav && !isDoor;
@@ -303,7 +326,12 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
     ? getHotspotFaceTexture('photo')
     : hotspot.type === 'external_link'
     ? getHotspotFaceTexture('external_link')
-    : getHotspotFaceTexture('info');
+    : getInfoTexture();
+
+  // Info hotspots are drawn smaller (see getInfoTexture); everything else keeps
+  // the full coin size.
+  const isInfo = hotspot.type === 'info';
+  const k = isInfo ? 0.58 : 1;
 
   // Tilted-arrow hotspots "lie down" like a floor marker (instead of floating
   // upright facing the camera) — an X rotation on the local axis, still valid for
@@ -339,11 +367,11 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
         <a-ring
           hotspot-layer="order: 0"
           rotation={flatRotation}
-          radius-inner="0.42"
-          radius-outer="0.48"
-          material="shader: flat; side: double; color: #ffffff; opacity: 0.7"
-          animation__pulse="property: scale; from: 0.95 0.95 0.95; to: 1.55 1.55 1.55; loop: true; dur: 2200; easing: easeOutSine"
-          animation__pulsefade="property: material.opacity; from: 0.7; to: 0; loop: true; dur: 2200; easing: easeOutSine"
+          radius-inner={isInfo ? 0.25 : 0.42}
+          radius-outer={isInfo ? 0.275 : 0.48}
+          material={`shader: flat; side: double; color: #ffffff; opacity: ${isInfo ? 0.45 : 0.7}`}
+          animation__pulse={`property: scale; from: 0.95 0.95 0.95; to: ${isInfo ? '1.35 1.35 1.35' : '1.55 1.55 1.55'}; loop: true; dur: ${isInfo ? 2800 : 2200}; easing: easeOutSine`}
+          animation__pulsefade={`property: material.opacity; from: ${isInfo ? 0.45 : 0.7}; to: 0; loop: true; dur: ${isInfo ? 2800 : 2200}; easing: easeOutSine`}
         />
 
         {/* Hotspot face: glow + coin + rim + icon in ONE texture, ONE plane —
@@ -353,12 +381,12 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
         <a-image
           hotspot-layer="order: 1"
           src={faceTexture}
-          width="1.05"
-          height="1.05"
+          width={1.05 * k}
+          height={1.05 * k}
           material="shader: flat; side: double; transparent: true; alphaTest: 0.02"
           {...(isTiltedArrow
             ? { rotation: flatRotation }
-            : isDoor
+            : isDoor || isInfo
             ? { rotation: '0 0 0' }
             : {
                 animation__tilt:
@@ -366,7 +394,13 @@ function HotspotEntity({ hotspot, onActivate }: { hotspot: Hotspot; onActivate: 
               })}
         />
 
-        <a-text value={hotspot.label} align="center" position="0 0.74 0" width="5" color="#ffffff" />
+        <a-text
+          value={hotspot.label}
+          align="center"
+          position={`0 ${isInfo ? 0.44 : 0.74} 0`}
+          width={isInfo ? 3.6 : 5}
+          color="#ffffff"
+        />
       </a-entity>
     </a-entity>
   );

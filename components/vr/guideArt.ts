@@ -121,22 +121,31 @@ function coin(ctx: Ctx, x: number, y: number, r: number, icon: CoinIcon, hover =
     ctx.lineWidth = 1.2;
     ctx.stroke();
   }
-  const glow = ctx.createRadialGradient(0, 0, r * 0.6, 0, 0, r * 1.6);
-  glow.addColorStop(0, 'rgba(255,255,255,0.35)');
-  glow.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = glow;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 1.6, 0, Math.PI * 2);
-  ctx.fill();
-  const body = ctx.createRadialGradient(0, -r * 0.1, 0, 0, 0, r);
-  body.addColorStop(0, '#3a3a3a');
-  body.addColorStop(1, '#0a0a0a');
-  ctx.fillStyle = body;
+  // Info hotspots look lighter in the tour (see HotspotLayer getInfoTexture):
+  // a see-through disc with a thin rim and no glow.
+  const glass = icon === 'info';
+  if (!glass) {
+    const glow = ctx.createRadialGradient(0, 0, r * 0.6, 0, 0, r * 1.6);
+    glow.addColorStop(0, 'rgba(255,255,255,0.35)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 1.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  if (glass) {
+    ctx.fillStyle = 'rgba(10,14,28,0.45)';
+  } else {
+    const body = ctx.createRadialGradient(0, -r * 0.1, 0, 0, 0, r);
+    body.addColorStop(0, '#3a3a3a');
+    body.addColorStop(1, '#0a0a0a');
+    ctx.fillStyle = body;
+  }
   ctx.beginPath();
   ctx.arc(0, 0, r, 0, Math.PI * 2);
   ctx.fill();
   ctx.strokeStyle = hover > 0.5 ? C.amber : 'rgba(255,255,255,0.92)';
-  ctx.lineWidth = r * 0.14;
+  ctx.lineWidth = r * (glass ? 0.09 : 0.14);
   ctx.stroke();
   ctx.fillStyle = C.white;
   if (icon === 'arrow') {

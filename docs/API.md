@@ -144,6 +144,17 @@ the Multimedia App (single source of truth, no duplication).
 > Note: example values (names, descriptions, captions) are shown in Indonesian
 > because that's the actual content language the API will serve.
 
+> **As implemented by the backend** (backend API documentation, Oct 2026) the
+> field names differ from the draft above:
+> `GET /api/vr/collections/{slug|uuid}` → `{ id: <uuid>, slug_name, name_common, name_latin, description, media_assets: [{ url, type }] }`,
+> and the full item is `GET /api/multimedia/{uuid}` → `{ name_common, detail: { general_description, … }, photos: [{ url, caption, order }] }`.
+> The VR info panel shows only **images, title and general description**:
+> `lib/api.ts` (`getCollection`) resolves the hotspot's `collection_id` via the
+> VR endpoint, then reads `name_common`, `detail.general_description` and
+> `photos` from `/multimedia/{uuid}`, falling back to the VR endpoint's
+> `description` / `media_assets` (images only) — and to the draft field names
+> above — whenever a value is missing.
+
 ---
 
 ## Field Reference

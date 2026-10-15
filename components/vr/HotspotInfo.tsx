@@ -63,7 +63,7 @@ export default function HotspotInfo({
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5">
             <MediaGallery photos={collection.photos} alt={collection.name} />
 
-            <p className="text-sm leading-relaxed text-neutral-700">{collection.description}</p>
+            <p className="whitespace-pre-line text-sm leading-relaxed text-neutral-700">{collection.description}</p>
 
             {collection.audio_url && (
               <div className="space-y-1.5">
