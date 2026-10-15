@@ -389,38 +389,56 @@ export function VRButton({
 // In VR a photo becomes a WebGL texture, and the browser only lets WebGL use an
 // image from another domain if that server sends CORS headers — the backend's
 // storage may not, even though the same photo shows fine in the 2D <img> panel
-// (an <img> needs no CORS). So headset photos are fetched through Next's image
-// optimizer first (/_next/image: same origin, so no CORS, and resized — the
-// CMS's multi-MB originals would load slowly in a headset). If that fails (e.g.
-// an SVG, which the optimizer refuses), the original URL is tried directly;
-// null means neither works, so the panel can say so instead of loading forever.
-const VR_IMAGE_TIMEOUT_MS = 25000;
+// (an <img> needs no CORS). So each headset photo is resolved to a URL that
+// works as a texture:
+//   1. Next's image optimizer (/_next/image — same origin, and resized, so the
+//      CMS's multi-MB originals load fast on a Quest) and the original URL
+//      (works when the server does send CORS) are tried side by side; the
+//      first one to load wins.
+//   2. If both fail — e.g. an http:// or unusually labelled photo the optimizer
+//      refuses, on a server without CORS — our own pass-through route
+//      (/api/vr-image, limited to the backend's hosts) serves it as is.
+// null means nothing worked, so the panel can say so instead of loading forever.
+const VR_IMAGE_TIMEOUT_MS = 15000;
 const vrImages = new Map<string, Promise<string | null>>();
 
-function optimizedUrl(url: string, width: number): string | null {
+function remoteUrl(url: string): URL | null {
   try {
     const u = new URL(url, window.location.href);
     if (u.origin === window.location.origin || (u.protocol !== 'http:' && u.protocol !== 'https:')) return null;
-    return `/_next/image?url=${encodeURIComponent(u.href)}&w=${width}&q=80`;
+    return u;
   } catch {
     return null;
   }
 }
 
-function canLoad(src: string): Promise<boolean> {
+function canLoad(src: string, timeoutMs = VR_IMAGE_TIMEOUT_MS): Promise<string | null> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous'; // the same mode the texture loader uses
-    const timer = window.setTimeout(() => resolve(false), VR_IMAGE_TIMEOUT_MS);
+    const timer = window.setTimeout(() => resolve(null), timeoutMs);
     img.onload = () => {
       window.clearTimeout(timer);
-      resolve(true);
+      resolve(src);
     };
     img.onerror = () => {
       window.clearTimeout(timer);
-      resolve(false);
+      resolve(null);
     };
     img.src = src;
+  });
+}
+
+/** The first attempt that loads, or null once all of them have failed. */
+function firstLoaded(attempts: Promise<string | null>[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    let left = attempts.length;
+    for (const attempt of attempts) {
+      attempt.then((src) => {
+        if (src) resolve(src);
+        else if (--left === 0) resolve(null);
+      });
+    }
   });
 }
 
@@ -431,10 +449,19 @@ export function resolveVrImage(url: string, width = 1200): Promise<string | null
   let p = vrImages.get(key);
   if (!p) {
     p = (async () => {
-      const via = optimizedUrl(url, width);
-      if (via && (await canLoad(via))) return via;
-      if (await canLoad(url)) return url;
-      return null;
+      const remote = remoteUrl(url);
+      if (!remote) return canLoad(url); // same origin: nothing to work around
+      const href = encodeURIComponent(remote.href);
+      const loaded =
+        (await firstLoaded([canLoad(`/_next/image?url=${href}&w=${width}&q=80`), canLoad(remote.href)])) ??
+        (await canLoad(`/api/vr-image?url=${href}`, 25000));
+      if (!loaded && process.env.NODE_ENV !== 'production') {
+        console.warn(
+          `[VR] Foto tidak dapat dimuat di VR: ${remote.href} — cek di tab Network: /_next/image, /api/vr-image ` +
+            '(403 = host belum diizinkan, lihat VR_IMAGE_HOSTS), atau aktifkan CORS di server foto.',
+        );
+      }
+      return loaded;
     })();
     vrImages.set(key, p);
   }
@@ -658,9 +685,9 @@ export function VRInfoPanel({ collectionId, onClose }: { collectionId: string; o
       )}
       {photos.length > 1 && (
         <>
-          <VRButton label="‹ Foto" x={left + pad + 0.2} y={btnY} width={0.36}
+          <VRButton name="photo-prev" label="‹ Foto" x={left + pad + 0.2} y={btnY} width={0.36}
             onClick={() => setPhotoIndex((i) => (i - 1 + photos.length) % photos.length)} />
-          <VRButton label="Foto ›" x={left + pad + 0.6} y={btnY} width={0.36}
+          <VRButton name="photo-next" label="Foto ›" x={left + pad + 0.6} y={btnY} width={0.36}
             onClick={() => setPhotoIndex((i) => (i + 1) % photos.length)} />
         </>
       )}

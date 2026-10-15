@@ -116,7 +116,7 @@ button explains that no headset was detected instead of entering VR.
 
 Requirements:
 - The site must be served over **HTTPS** (browsers only expose WebXR in a secure context; `localhost` also counts).
-- Collection photos and panoramas load into WebGL, so the storage server must send **CORS** headers (`Access-Control-Allow-Origin`) for them.
+- Panoramas load into WebGL, so their server must send **CORS** headers (`Access-Control-Allow-Origin`). Collection photos in the VR panels don't need it: they are loaded through the app's own origin (Next image optimizer, or the `/api/vr-image` pass-through limited to the backend's hosts — add other photo hosts to `VR_IMAGE_HOSTS`).
 
 Inside the headset:
 | Input | Point | Activate |
