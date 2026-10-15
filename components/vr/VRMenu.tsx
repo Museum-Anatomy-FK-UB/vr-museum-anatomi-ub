@@ -10,6 +10,7 @@ import {
   drawCard,
   headYaw,
   newCanvas,
+  resolveVrImage,
   roundRect,
   useEntityClick,
 } from './VRPanels';
@@ -429,7 +430,12 @@ function loadThumb(url: string): Promise<string | null> {
         }
       };
       img.onerror = () => resolve(null);
-      img.src = url;
+      // Through the same-origin image optimizer when possible (see
+      // resolveVrImage): a storage server without CORS would taint the canvas.
+      resolveVrImage(url, 384).then((src) => {
+        if (src) img.src = src;
+        else resolve(null);
+      });
     });
     thumbCache.set(url, p);
   }

@@ -385,9 +385,96 @@ export function VRButton({
 }
 
 /** Photo scaled to fit a box, kept hidden until its texture has loaded (no white flash). */
+// ---- Remote photos in the headset ---------------------------------------------
+// In VR a photo becomes a WebGL texture, and the browser only lets WebGL use an
+// image from another domain if that server sends CORS headers — the backend's
+// storage may not, even though the same photo shows fine in the 2D <img> panel
+// (an <img> needs no CORS). So headset photos are fetched through Next's image
+// optimizer first (/_next/image: same origin, so no CORS, and resized — the
+// CMS's multi-MB originals would load slowly in a headset). If that fails (e.g.
+// an SVG, which the optimizer refuses), the original URL is tried directly;
+// null means neither works, so the panel can say so instead of loading forever.
+const VR_IMAGE_TIMEOUT_MS = 25000;
+const vrImages = new Map<string, Promise<string | null>>();
+
+function optimizedUrl(url: string, width: number): string | null {
+  try {
+    const u = new URL(url, window.location.href);
+    if (u.origin === window.location.origin || (u.protocol !== 'http:' && u.protocol !== 'https:')) return null;
+    return `/_next/image?url=${encodeURIComponent(u.href)}&w=${width}&q=80`;
+  } catch {
+    return null;
+  }
+}
+
+function canLoad(src: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // the same mode the texture loader uses
+    const timer = window.setTimeout(() => resolve(false), VR_IMAGE_TIMEOUT_MS);
+    img.onload = () => {
+      window.clearTimeout(timer);
+      resolve(true);
+    };
+    img.onerror = () => {
+      window.clearTimeout(timer);
+      resolve(false);
+    };
+    img.src = src;
+  });
+}
+
+/** A URL for `url` that can be used as a WebGL texture, or null if none loads.
+ *  `width` must be one of Next's image sizes (e.g. 384, 640, 1200). */
+export function resolveVrImage(url: string, width = 1200): Promise<string | null> {
+  const key = `${width}|${url}`;
+  let p = vrImages.get(key);
+  if (!p) {
+    p = (async () => {
+      const via = optimizedUrl(url, width);
+      if (via && (await canLoad(via))) return via;
+      if (await canLoad(url)) return url;
+      return null;
+    })();
+    vrImages.set(key, p);
+  }
+  return p;
+}
+
+// Shown where a photo should be when it can't be loaded at all — covers the
+// card's "Memuat foto…" placeholder (same fill), so it never waits forever.
+const failTextures = new Map<string, string>();
+function failTexture(wM: number, hM: number): string {
+  const key = `${wM}|${hM}`;
+  const cached = failTextures.get(key);
+  if (cached) return cached;
+  const { canvas, ctx } = newCanvas(wM, hM);
+  roundRect(ctx, 0, 0, canvas.width, canvas.height, 18);
+  ctx.fillStyle = '#1d2537';
+  ctx.fill();
+  ctx.font = `400 22px ${FONT}`;
+  ctx.fillStyle = '#94a3b8';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Foto tidak dapat dimuat', canvas.width / 2, canvas.height / 2);
+  const src = canvas.toDataURL('image/png');
+  failTextures.set(key, src);
+  return src;
+}
+
 function FittedImage({ url, x, y, maxW, maxH }: { url: string; x: number; y: number; maxW: number; maxH: number }) {
   const ref = useRef<HTMLElement>(null);
+  // undefined: still resolving · null: can't be loaded · string: texture URL
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    setSrc(undefined);
+    resolveVrImage(url).then((resolved) => alive && setSrc(resolved));
+    return () => {
+      alive = false;
+    };
+  }, [url]);
   useEffect(() => {
     setSize(null);
     const el = ref.current;
@@ -402,12 +489,26 @@ function FittedImage({ url, x, y, maxW, maxH }: { url: string; x: number; y: num
     };
     el.addEventListener('materialtextureloaded', onLoad);
     return () => el.removeEventListener('materialtextureloaded', onLoad);
-  }, [url, maxW, maxH]);
+  }, [src, maxW, maxH]);
+  if (src === undefined) return null; // the card's "Memuat foto…" shows meanwhile
+  if (src === null) {
+    return (
+      <a-plane
+        data-photo="failed"
+        vr-layer="order: 1"
+        src={failTexture(maxW, maxH)}
+        position={`${x} ${y} 0.005`}
+        width={maxW}
+        height={maxH}
+        material="shader: flat; transparent: true"
+      />
+    );
+  }
   return (
     <a-image
       ref={ref}
       vr-layer="order: 1"
-      src={url}
+      src={src}
       position={`${x} ${y} 0.005`}
       width={size?.w ?? maxW}
       height={size?.h ?? maxH}
