@@ -12,6 +12,15 @@
 //      "gliding" then slows down & stops (not an abrupt halt).
 //   3) Consistent direction: dragging right→left moves the content to the right
 //      (and vice versa), the same on mouse and touch.
+//
+// Also owns ARROW-KEY controls (desktop, outside VR): Left/Right smoothly turn
+// the view (same ease-in/out feel as the mouse). Up/Down "click" whichever
+// hotspot the camera is turned toward / away from (see findFacingClickable —
+// horizontal bearing within ~50°, pitch ignored, because nav arrows lie on the
+// floor; there's no visible crosshair on desktop, so this deliberately does NOT
+// require pixel-precise aim like a mouse click does) and emit a real 'click' on
+// it, so navigation/info/photo/external-link all just work with zero changes
+// elsewhere.
 export function registerSmoothDragLook() {
   const AFRAME =
     typeof window !== 'undefined' ? (window as unknown as { AFRAME?: any }).AFRAME : undefined;
@@ -29,6 +38,8 @@ export function registerSmoothDragLook() {
       velocitySmoothing: { default: 0.4 }, // EMA for the velocity estimate (seeds inertia)
       clickMaxPx: { default: 8 }, // movement <= this many px between press-release counts as a CLICK, not a drag
       hoverThrottleMs: { default: 80 }, // minimum gap between hover raycasts
+      keySpeed: { default: 1.6 }, // rad/s at full ramp — Arrow Left/Right look speed
+      keyRamp: { default: 220 }, // ms ease-in when a key is pressed / ease-out after release
     },
 
     init(this: any) {
@@ -50,6 +61,9 @@ export function registerSmoothDragLook() {
       this.lastHoverTime = 0;
       this.raycaster = new THREE.Raycaster();
       this.ndc = new THREE.Vector2();
+      this.keyYawSign = 0; // +1 while Left held, -1 while Right held, 0 otherwise
+      this.lastKeyYawSign = 0; // sign to keep decelerating with after key-up
+      this.keyRampFrac = 0; // 0..1 ease-in/out envelope for keyboard look
 
       const sceneEl = this.el.sceneEl;
       const getLook = () => this.el.components['look-controls'];
@@ -74,6 +88,67 @@ export function registerSmoothDragLook() {
         let el: HTMLElement | null = hitEl;
         while (el && !(el.classList && el.classList.contains('clickable'))) el = el.parentElement;
         return el;
+      };
+
+      // Keyboard activation deliberately does NOT require a pixel-precise raycast —
+      // there's no visible crosshair on desktop, so demanding an exact hit would be
+      // unusable. Instead: find the .clickable hotspot the camera is FACING (or has
+      // behind it, for the Down key).
+      //
+      // "Facing" is measured on the HORIZONTAL BEARING ONLY (pitch stripped out).
+      // Nav arrows are floor markers — nearly every one sits at pitch −20°..−49° —
+      // so a full 3D cone would reject them whenever the visitor looks straight
+      // ahead, which is exactly how people look around. What matters is only
+      // "am I turned toward it?", never "am I looking down at it?".
+      this.findFacingClickable = (forwardSign: 1 | -1) => {
+        const cam3 = sceneEl.camera;
+        if (!cam3) return null;
+        cam3.updateMatrixWorld(true);
+        const camPos = new THREE.Vector3();
+        cam3.getWorldPosition(camPos);
+        const camDir = new THREE.Vector3();
+        cam3.getWorldDirection(camDir);
+        if (forwardSign === -1) camDir.negate();
+
+        // Bearing of the view on the XZ plane. Degenerate only when looking almost
+        // straight up/down, where "which way am I turned" has no meaning — there we
+        // fall back to the 3D cone alone (which then points at the floor anyway).
+        const camFlatLen = Math.hypot(camDir.x, camDir.z);
+        const hasBearing = camFlatLen > 0.15; // ≈ steeper than 81° up/down
+        const camFlatX = camDir.x / (camFlatLen || 1);
+        const camFlatZ = camDir.z / (camFlatLen || 1);
+
+        const ACCEPT_3D = Math.cos((30 * Math.PI) / 180); // aimed right at it
+        const ACCEPT_BEARING = Math.cos((50 * Math.PI) / 180); // merely turned toward it
+        const roots = Array.from(sceneEl.querySelectorAll('.clickable')) as any[];
+        const toHotspot = new THREE.Vector3();
+        let best: HTMLElement | null = null;
+        let bestDot = -Infinity;
+        roots.forEach((r) => {
+          const obj = r.object3D;
+          if (!obj) return;
+          obj.updateMatrixWorld(true);
+          const hotspotPos = new THREE.Vector3();
+          obj.getWorldPosition(hotspotPos);
+          toHotspot.copy(hotspotPos).sub(camPos).normalize();
+
+          const dot3d = toHotspot.dot(camDir);
+          let accepted = dot3d > ACCEPT_3D;
+          if (!accepted && hasBearing) {
+            const hLen = Math.hypot(toHotspot.x, toHotspot.z);
+            if (hLen > 1e-4) {
+              const dotBearing = (toHotspot.x * camFlatX + toHotspot.z * camFlatZ) / hLen;
+              accepted = dotBearing > ACCEPT_BEARING;
+            }
+          }
+          // Ranked by the 3D angle so the most directly-faced hotspot still wins
+          // when several are within tolerance.
+          if (accepted && dot3d > bestDot) {
+            bestDot = dot3d;
+            best = r;
+          }
+        });
+        return best;
       };
 
       this.pxToNdc = (x: number, y: number) => {
@@ -181,7 +256,39 @@ export function registerSmoothDragLook() {
       this.resetDrag = () => {
         this.dragging = false;
         this.hasInertia = false;
+        this.keyYawSign = 0; // e.g. alt-tabbing away mid-hold with no keyup to catch it
         if (this.canvas) this.canvas.style.cursor = 'grab';
+      };
+
+      // Arrow-key look/activate. Left/Right set a direction; the actual rotation
+      // (with ease-in/out) happens in tick() so it shares one smoothing engine
+      // with dragging. Up/Down click the hotspot ahead of / behind the view.
+      this.onKeyDown = (e: KeyboardEvent) => {
+        if (sceneEl.is('vr-mode') || sceneEl.is('ar-mode')) return;
+        const active = document.activeElement as HTMLElement | null;
+        // Don't hijack arrow keys while the visitor is typing (login form, calibrate
+        // tool inputs, etc.) — text cursor movement should win there.
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.isContentEditable)) {
+          return;
+        }
+
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+          e.preventDefault();
+          this.keyYawSign = e.key === 'ArrowLeft' ? 1 : -1;
+          this.hasInertia = false; // keyboard look takes over from any leftover drag inertia
+        } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          if (e.repeat) return; // one activation per press, not a flood while held
+          e.preventDefault();
+          // Up = whatever hotspot you're roughly facing; Down = whatever's roughly
+          // behind you (e.g. a "back to ..." hotspot) — no need to turn around first.
+          const el = this.findFacingClickable(e.key === 'ArrowUp' ? 1 : -1);
+          (el as any)?.emit?.('click');
+        }
+      };
+
+      this.onKeyUp = (e: KeyboardEvent) => {
+        if (e.key === 'ArrowLeft' && this.keyYawSign === 1) this.keyYawSign = 0;
+        if (e.key === 'ArrowRight' && this.keyYawSign === -1) this.keyYawSign = 0;
       };
 
       this.attach = () => {
@@ -196,6 +303,8 @@ export function registerSmoothDragLook() {
         window.addEventListener('pointerup', this.onPointerUp);
         window.addEventListener('pointercancel', this.onPointerUp);
         window.addEventListener('blur', this.resetDrag);
+        window.addEventListener('keydown', this.onKeyDown);
+        window.addEventListener('keyup', this.onKeyUp);
       };
       if (sceneEl.canvas) this.attach();
       else sceneEl.addEventListener('render-target-loaded', this.attach, { once: true });
@@ -212,6 +321,8 @@ export function registerSmoothDragLook() {
       window.removeEventListener('pointerup', this.onPointerUp);
       window.removeEventListener('pointercancel', this.onPointerUp);
       window.removeEventListener('blur', this.resetDrag);
+      window.removeEventListener('keydown', this.onKeyDown);
+      window.removeEventListener('keyup', this.onKeyUp);
     },
 
     tick(this: any, _time: number, dt: number) {
@@ -226,6 +337,26 @@ export function registerSmoothDragLook() {
         look.yawObject.rotation.y += (this.targetYaw - look.yawObject.rotation.y) * alpha;
         look.pitchObject.rotation.x += (this.targetPitch - look.pitchObject.rotation.x) * alpha;
         return;
+      }
+
+      // Arrow-key look: ease in while a key is held, ease back out after release
+      // (still turning, just decelerating) — same "smooth" feel as a mouse drag.
+      const keyHeld = this.keyYawSign !== 0;
+      if (keyHeld || this.keyRampFrac > 0) {
+        const step = dt / this.data.keyRamp;
+        this.keyRampFrac = keyHeld
+          ? Math.min(1, this.keyRampFrac + step)
+          : Math.max(0, this.keyRampFrac - step);
+
+        if (this.keyRampFrac > 0) {
+          const sign = keyHeld ? this.keyYawSign : this.lastKeyYawSign;
+          if (keyHeld) this.lastKeyYawSign = this.keyYawSign;
+          look.yawObject.rotation.y += sign * this.data.keySpeed * this.keyRampFrac * (dt / 1000);
+          // Keep the drag-chase target in sync so a mouse drag right after doesn't jump.
+          this.targetYaw = look.yawObject.rotation.y;
+          this.targetPitch = look.pitchObject.rotation.x;
+          return;
+        }
       }
 
       if (this.hasInertia) {

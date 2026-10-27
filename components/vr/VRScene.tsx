@@ -1,12 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import type { Scene, SceneSummary } from '@/lib/types/tour';
-import { getScene, getScenes } from '@/lib/api';
+import type { ExternalLinkHotspot, Hotspot, PhotoHotspot, Scene, SceneSummary } from '@/lib/types/tour';
+import { getScene, getScenes, isRestrictedScene, isRestrictedUnlocked } from '@/lib/api';
 import HotspotLayer, { registerHotspotLayer } from './HotspotLayer';
 import HotspotInfo from './HotspotInfo';
+import HotspotPhotoModal from './HotspotPhotoModal';
 import SceneControlsBar from './SceneControlsBar';
 import SceneGallery from './SceneGallery';
 import FloorplanMap from './FloorplanMap';
@@ -17,32 +18,87 @@ import { registerSmoothDragLook } from './smoothDragLook';
 import { registerSkyCrossfade } from './skyCrossfade';
 import { registerScrollZoom } from './scrollZoom';
 import { registerLittlePlanetIntro } from './littlePlanetIntro';
+import { registerVrHandStyle, registerXrPointer } from './xrPointer';
+import {
+  headYaw,
+  prefetchVrCollection,
+  prefetchVrPhoto,
+  registerVrLayer,
+  registerVrPhoto,
+  VRInfoPanel,
+  VRLoginPanel,
+  VRNoticePanel,
+  VRPhotoPanel,
+  type VRNoticeAction,
+} from './VRPanels';
+import { registerVrMenuFollow, VRFloorplanPanel, VRLocationsPanel, VRMenuBar } from './VRMenu';
+import { primeGuideAudio, registerVrGuideArt, registerVrGuideVoice, stopGuideAudio, VRGuidePanel } from './VRGuide';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-// --- Restricted-area gate --------------------------------------------------
+type XRScene = HTMLElement & {
+  is(state: string): boolean;
+  xrSession?: unknown;
+  enterVR(): Promise<unknown>;
+  exitVR(): Promise<unknown>;
+};
+const getSceneEl = () => document.querySelector('a-scene') as unknown as XRScene | null;
+
+/** True only inside a REAL immersive WebXR session (e.g. on a Meta Quest). */
+function isImmersive() {
+  const sceneEl = getSceneEl();
+  return !!sceneEl?.is('vr-mode') && !!sceneEl.xrSession;
+}
+
+/**
+ * Which way (degrees around world Y) a room should be turned on arrival so its
+ * intended front — the view `initial_yaw` defines — ends up where the visitor is
+ * looking. In 2D that's 0: there the CAMERA is turned to the front instead (see
+ * recenterLook). In a headset the camera IS the visitor's head and must never be
+ * forced, so the room (panorama + hotspots together, so hotspots stay on their
+ * objects) is turned to face them instead — the same "arrive looking at the right
+ * thing" as in 2D, wherever they happened to be facing.
+ */
+function arrivalYawDeg(currentDeg: number): number {
+  if (!isImmersive()) return 0;
+  const cam = (getSceneEl() as unknown as { camera?: { getWorldQuaternion(q: unknown): unknown } } | null)?.camera;
+  const THREE = (window as unknown as { AFRAME?: { THREE?: any } }).AFRAME?.THREE;
+  if (!cam || !THREE) return currentDeg;
+  // Looking (nearly) straight up or down there is no meaningful heading — it can
+  // even flip 180° past the vertical — so keep the room's current orientation.
+  const q = new THREE.Quaternion();
+  cam.getWorldQuaternion(q);
+  const pitch = new THREE.Euler().setFromQuaternion(q, 'YXZ').x;
+  if (Math.abs(pitch) > (70 * Math.PI) / 180) return currentDeg;
+  return (headYaw(cam, THREE) * 180) / Math.PI;
+}
+
+/**
+ * Why "Mode VR" can't start here, or null if an immersive-vr session is possible.
+ * A-Frame's own enterVR() must NOT be called without a headset: on a desktop it
+ * falls back to a "VR mode" that only fullscreens the canvas, and every look
+ * control here is disabled in vr-mode — which is exactly the "freeze" visitors saw.
+ */
+async function vrUnavailableReason(): Promise<string | null> {
+  if (!window.isSecureContext) {
+    return 'Mode VR hanya tersedia melalui koneksi aman (HTTPS).';
+  }
+  const xr = (navigator as Navigator & { xr?: { isSessionSupported(mode: string): Promise<boolean> } }).xr;
+  const supported = await xr?.isSessionSupported('immersive-vr').catch(() => false);
+  if (supported) return null;
+  return 'Headset VR tidak terdeteksi. Buka alamat ini di browser headset VR (mis. Meta Quest Browser) untuk masuk ke Mode VR.';
+}
+
+// Something a hotspot asks for that can't happen inside the headset (another
+// website) — the visitor is offered to leave VR for it.
+type VRNotice = { kind: 'external'; hotspot: ExternalLinkHotspot };
+
 // Rooms whose slug starts with "restricted-" require a login before entering,
-// both via the door hotspot AND via a direct URL. The unlock is per browser
-// session. NOTE: this is a front-end gate only — real protection needs the
-// backend to require auth on the restricted room's data endpoint.
-const RESTRICTED_KEY = 'vr-restricted-unlocked';
-const isRestricted = (id: string) => id.startsWith('restricted-');
-function readUnlocked(): boolean {
-  if (typeof window === 'undefined') return false;
-  try {
-    return window.sessionStorage.getItem(RESTRICTED_KEY) === '1';
-  } catch {
-    return false;
-  }
-}
-function writeUnlocked(): void {
-  try {
-    window.sessionStorage.setItem(RESTRICTED_KEY, '1');
-  } catch {
-    // best-effort
-  }
-}
+// both via the door hotspot AND via a direct URL. `isRestrictedScene` /
+// `isRestrictedUnlocked` live in lib/api.ts (same module that stores the
+// Sanctum token and attaches it to requests), so the gate here and the actual
+// fetch always agree on auth state.
 
 /**
  * A-Frame initializes an entity's components asynchronously, so right after React
@@ -104,6 +160,18 @@ function recenterLook(cam: HTMLElement, dur: number) {
   }, dur + 60);
 }
 
+// Default names the calibration editor gives new hotspots ("Hotspot 1", …) were
+// seeded into the backend as-is; they are not real captions, so don't show them.
+const isDefaultHotspotLabel = (label: string) => /^hotspot\s*\d+$/i.test(label.trim());
+
+// Info hotspots with no collection linked yet (backend sends collection_id: null)
+// would open an empty/failing panel, so they are hidden until the data exists.
+function presentableHotspots(hotspots: Hotspot[]): Hotspot[] {
+  return hotspots
+    .filter((h) => h.type !== 'info' || !!h.collection_id)
+    .map((h) => (isDefaultHotspotLabel(h.label) ? { ...h, label: '' } : h));
+}
+
 // PERSISTENT A-Frame scene: the a-scene is not torn down when switching rooms —
 // the panorama & hotspots are swapped in place while animated (zoom + fade) for a
 // smooth 3DVista-like transition. MUST be dynamically imported with ssr:false (A-Frame is anti-SSR).
@@ -111,10 +179,13 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [ready, setReady] = useState(false);
   const [activeScene, setActiveScene] = useState<Scene | null>(null);
   const [sceneList, setSceneList] = useState<SceneSummary[]>([]);
+  const sceneListRef = useRef<SceneSummary[]>([]);
+  sceneListRef.current = sceneList;
   const [loadError, setLoadError] = useState(false);
   const [covered, setCovered] = useState(true); // initial black overlay (for the intro reveal)
   const [coverDuration, setCoverDuration] = useState(750);
   const [activeCollectionId, setActiveCollectionId] = useState<string | null>(null);
+  const [activePhotoHotspot, setActivePhotoHotspot] = useState<PhotoHotspot | null>(null);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [floorplanOpen, setFloorplanOpen] = useState(false);
   const [hotspotsVisible, setHotspotsVisible] = useState(true);
@@ -122,6 +193,32 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const [introPlaying, setIntroPlaying] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [pendingSceneId, setPendingSceneId] = useState<string | null>(null);
+  const [inVR, setInVR] = useState(false);
+  const [vrNotice, setVrNotice] = useState<VRNotice | null>(null);
+  // Restricted room the visitor is logging in for, from inside the headset.
+  const [vrLoginSceneId, setVrLoginSceneId] = useState<string | null>(null);
+  const vrLoginSceneIdRef = useRef<string | null>(null);
+  vrLoginSceneIdRef.current = vrLoginSceneId;
+  // How far the current room is turned to face the visitor (VR only, degrees —
+  // see arrivalYawDeg). Applied to the panorama AND the hotspot layer.
+  const [worldYaw, setWorldYaw] = useState(0);
+  const worldYawRef = useRef(0);
+  // VR menu bar: closed (just the small "Menu" button) unless opened.
+  const [vrMenuOpen, setVrMenuOpen] = useState(false);
+  // VR guide (tutorial) — opens by itself in every VR session, the first time
+  // the visitor is at the Main Location (the headset is shared by many museum
+  // visitors, each starting their own session). Within a session it's offered
+  // once, so going back to the Main Location doesn't bring it up again; the VR
+  // menu ("Panduan") reopens it any time.
+  const [guideOpen, setGuideOpen] = useState(false);
+  const guideOfferedRef = useRef(false);
+  const offerGuide = () => {
+    if (guideOfferedRef.current) return;
+    guideOfferedRef.current = true;
+    setGuideOpen(true);
+  };
+  // Small on-screen message (outside VR), optionally with a link to open.
+  const [toast, setToast] = useState<{ message: string; href?: string; newTab?: boolean } | null>(null);
 
   const router = useRouter();
 
@@ -129,11 +226,15 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const skyRef = useRef<HTMLElement>(null);
   const cameraRef = useRef<HTMLElement>(null);
   const planetRef = useRef<HTMLElement>(null);
-  const cursorRef = useRef<HTMLElement>(null);
   const transitioningRef = useRef(false);
   const didIntroRef = useRef(false);
   const currentIdRef = useRef<string | null>(null);
   const activeSceneRef = useRef<Scene | null>(null);
+
+  const visibleHotspots = useMemo(
+    () => presentableHotspots(activeScene?.hotspots ?? []),
+    [activeScene],
+  );
 
   useEffect(() => {
     currentIdRef.current = activeScene?.id ?? null;
@@ -151,6 +252,13 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       registerScrollZoom();
       registerHotspotLayer();
       registerLittlePlanetIntro();
+      registerXrPointer();
+      registerVrLayer();
+      registerVrPhoto();
+      registerVrMenuFollow();
+      registerVrGuideArt();
+      registerVrGuideVoice();
+      registerVrHandStyle();
       if (mounted) setReady(true);
     });
     return () => {
@@ -173,37 +281,119 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     if (sceneEl.hasLoaded) apply();
     else sceneEl.addEventListener('loaded', apply, { once: true });
     window.addEventListener('resize', apply);
+    // A-Frame's exitVR() resets the pixel ratio to the full devicePixelRatio.
+    sceneEl.addEventListener('exit-vr', apply);
     return () => {
       sceneEl.removeEventListener('loaded', apply);
+      sceneEl.removeEventListener('exit-vr', apply);
       window.removeEventListener('resize', apply);
     };
   }, [ready]);
 
-  // Cursor per mode (no dot on desktop):
-  // - Desktop: NO dot — hotspot click & hover are handled by manual raycasting in
-  //   the smooth-drag-look component (release without dragging = click at pointer).
-  // - VR (Cardboard): show the gaze dot + raycaster + fuse (the only way to "click"
-  //   with your gaze).
+  // Input per mode:
+  // - Desktop/mobile browser: hotspot click & hover are handled by manual
+  //   raycasting in the smooth-drag-look component (no cursor dot).
+  // - Immersive VR (Meta Quest etc.): the xr-pointer component owns everything —
+  //   controller/hand lasers, trigger/pinch to click, and the gaze reticle only
+  //   when there is nothing to point with (see xrPointer.ts).
+  // This effect tracks whether a real XR session is running, so the in-headset
+  // panels are used instead of the (invisible there) HTML modals.
   useEffect(() => {
     if (!ready) return;
-    const sceneEl = document.querySelector('a-scene');
-    const gaze = cursorRef.current as unknown as { setAttribute(c: string, p?: unknown, v?: unknown): void } | null;
-    if (!sceneEl || !gaze) return;
+    const sceneEl = getSceneEl();
+    if (!sceneEl) return;
     const enter = () => {
-      gaze.setAttribute('visible', true);
-      gaze.setAttribute('raycaster', 'enabled', true);
+      if (!sceneEl.xrSession) return;
+      setInVR(true);
+      setToast(null);
+      setVrMenuOpen(false);
+      // A new VR session (new visitor, or the same one after a refresh/exit):
+      // starting at the Main Location shows the guide first.
+      guideOfferedRef.current = false;
+      const main = sceneListRef.current[0]?.id;
+      if (main && activeSceneRef.current?.id === main) offerGuide();
+      // The little-planet intro is a flat quad sized to the 2D camera — it has no
+      // meaning in stereo, so jump straight to the room if it's still playing.
+      (planetRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
+        'little-planet-intro'
+      ]?.finish?.();
     };
     const exit = () => {
-      gaze.setAttribute('visible', false);
-      gaze.setAttribute('raycaster', 'enabled', false);
+      setInVR(false);
+      setVrNotice(null);
+      setVrMenuOpen(false);
+      setGuideOpen(false); // VR-only; offered again in the next VR session
+      stopGuideAudio();
+      // Back in 2D: undo the VR-only room turn and land on the room's intended
+      // view, exactly as after a 2D navigation.
+      const scene = activeSceneRef.current;
+      if (worldYawRef.current !== 0 && scene) {
+        (skyRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
+          'sky-crossfade'
+        ]?.setYaw(scene.initial_yaw ?? 0, scene.horizon_roll ?? 0);
+        worldYawRef.current = 0;
+        setWorldYaw(0);
+      }
+      const look = (cameraRef.current as unknown as { components?: Record<string, any> } | null)?.components?.[
+        'look-controls'
+      ];
+      if (look?.yawObject && look?.pitchObject) {
+        look.yawObject.rotation.y = 0;
+        look.pitchObject.rotation.x = 0;
+      }
+      // Leaving VR mid-login continues in the regular HTML form.
+      const loginSceneId = vrLoginSceneIdRef.current;
+      if (loginSceneId) {
+        setVrLoginSceneId(null);
+        setPendingSceneId(loginSceneId);
+        setLoginOpen(true);
+      }
     };
+    // B / Y on a controller (emitted by xr-pointer) opens/closes the VR menu.
+    const toggleMenu = () => setVrMenuOpen((v) => !v);
     sceneEl.addEventListener('enter-vr', enter);
     sceneEl.addEventListener('exit-vr', exit);
+    sceneEl.addEventListener('vr-menu-toggle', toggleMenu);
     return () => {
       sceneEl.removeEventListener('enter-vr', enter);
       sceneEl.removeEventListener('exit-vr', exit);
+      sceneEl.removeEventListener('vr-menu-toggle', toggleMenu);
     };
   }, [ready]);
+
+  // In the headset, get each info/photo hotspot's content ready before it is
+  // clicked (collection text + first photo — the backend and the photo
+  // optimizer can take a while). Starts once the room has settled, two at a
+  // time, and stops when the visitor moves on.
+  useEffect(() => {
+    if (!inVR) return;
+    let cancelled = false;
+    const jobs = visibleHotspots.flatMap((h) =>
+      h.type === 'info'
+        ? [() => prefetchVrCollection(h.collection_id)]
+        : h.type === 'photo'
+        ? [() => prefetchVrPhoto(h.media_url)]
+        : [],
+    );
+    const worker = async () => {
+      for (let job = jobs.shift(); job && !cancelled; job = jobs.shift()) await job();
+    };
+    const t = setTimeout(() => {
+      worker();
+      worker();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [inVR, visibleHotspots]);
+
+  // The on-screen toast fades away on its own unless it carries a link to click.
+  useEffect(() => {
+    if (!toast || toast.href) return;
+    const t = setTimeout(() => setToast(null), 7000);
+    return () => clearTimeout(t);
+  }, [toast]);
 
   // Load a scene as the FIRST panorama (setInitial, not a crossfade). Reused on
   // mount and after a successful restricted-area login (direct-URL case).
@@ -224,7 +414,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   useEffect(() => {
     if (!ready) return;
     let mounted = true;
-    if (isRestricted(initialSceneId) && !readUnlocked()) {
+    if (isRestrictedScene(initialSceneId) && !isRestrictedUnlocked()) {
       // Direct URL into a restricted room: block it and require login first.
       setPendingSceneId(initialSceneId);
       setLoginOpen(true);
@@ -306,7 +496,12 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   const navigateTo = useCallback(async (targetId: string, transitionUrl?: string) => {
     if (transitioningRef.current || targetId === currentIdRef.current) return;
     // Restricted rooms require a login first (also blocks the door hotspot).
-    if (isRestricted(targetId) && !readUnlocked()) {
+    if (isRestrictedScene(targetId) && !isRestrictedUnlocked()) {
+      // The HTML login form is invisible inside the headset — log in there instead.
+      if (isImmersive()) {
+        setVrLoginSceneId(targetId);
+        return;
+      }
       setPendingSceneId(targetId);
       setLoginOpen(true);
       return;
@@ -323,7 +518,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       if (transitionUrl) {
         await sky?.components?.['sky-crossfade']?.crossfadeTo(
           transitionUrl,
-          activeSceneRef.current?.initial_yaw ?? 0,
+          (activeSceneRef.current?.initial_yaw ?? 0) + worldYawRef.current,
           500,
           activeSceneRef.current?.horizon_roll ?? 0,
           0,
@@ -334,6 +529,17 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       const next = await getScene(targetId);
 
       setActiveCollectionId(null);
+      setActivePhotoHotspot(null);
+      setVrNotice(null);
+      setVrLoginSceneId(null);
+      // In the headset, menu panels would stand in front of the new room, and
+      // the open menu bar would sit over its floor arrows.
+      if (isImmersive()) {
+        setGalleryOpen(false);
+        setFloorplanOpen(false);
+        setVrMenuOpen(false);
+        setGuideOpen(false);
+      }
 
       // Old hotspots shrink out (220ms)
       document.querySelectorAll('a-entity.hs-anim').forEach((el) => {
@@ -345,10 +551,14 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         (cam as unknown as { components?: Record<string, any> }).components?.['scroll-zoom']?.cancel?.();
       }
 
+      // VR: turn the new room so its front faces wherever the visitor is looking
+      // (0 in 2D — the camera is re-centered below instead).
+      const yawOffset = arrivalYawDeg(worldYawRef.current);
+
       // Blend old panorama -> new (700ms) + "push forward" on the old panorama
       const blend = sky?.components?.['sky-crossfade']?.crossfadeTo(
         next.panorama_url,
-        next.initial_yaw ?? 0,
+        (next.initial_yaw ?? 0) + yawOffset,
         700,
         next.horizon_roll ?? 0,
       );
@@ -362,8 +572,12 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
       // Swap hotspots & URL mid-blend (old hotspots have fully shrunk away;
       // the new ones mount and grow in during the rest of the blend)
       await wait(300);
+      worldYawRef.current = yawOffset;
+      setWorldYaw(yawOffset);
       setActiveScene(next);
       window.history.replaceState(null, '', `/vr/${next.id}`);
+      // VR started elsewhere: show the guide on the first arrival at the Main Location.
+      if (isImmersive() && next.id === sceneListRef.current[0]?.id) offerGuide();
 
       await blend;
     } finally {
@@ -377,16 +591,73 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
     else document.exitFullscreen?.();
   }, []);
 
-  // Enter VR / Cardboard — replicates A-Frame's built-in enter-VR button, which
-  // we hide (see globals.css) so VR is triggered from the footer control bar instead.
-  const enterVR = useCallback(() => {
-    const sceneEl = document.querySelector('a-scene') as unknown as { enterVR?: () => void } | null;
-    sceneEl?.enterVR?.();
+  // Enter immersive VR (Meta Quest / any WebXR headset) — replaces A-Frame's
+  // built-in enter-VR button, which we hide (see globals.css) so VR is triggered
+  // from the footer control bar instead. Without a headset it explains why rather
+  // than letting A-Frame fall into its fullscreen pseudo-VR (see vrUnavailableReason).
+  const enterVR = useCallback(async () => {
+    const sceneEl = getSceneEl();
+    if (!sceneEl || sceneEl.is('vr-mode')) return;
+    // Still inside the click: unlock audio so the guide's voice-over can play.
+    primeGuideAudio();
+    const reason = await vrUnavailableReason();
+    if (reason) {
+      setToast({ message: reason });
+      return;
+    }
+    try {
+      await sceneEl.enterVR();
+    } catch {
+      setToast({ message: 'Gagal masuk ke Mode VR. Pastikan headset aktif, lalu coba lagi.' });
+    }
   }, []);
 
-  // Restricted-area login handlers.
+  // External links can't open inside the headset (the browser tab stays hidden
+  // behind the VR session), so in VR the visitor is offered to leave VR first.
+  const openExternal = useCallback((hotspot: ExternalLinkHotspot) => {
+    if (isImmersive()) {
+      setVrNotice({ kind: 'external', hotspot });
+      return;
+    }
+    window.open(hotspot.url, hotspot.open_in_new_tab === false ? '_self' : '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const exitVRThen = (after: () => void) => {
+    setVrNotice(null);
+    const sceneEl = getSceneEl();
+    if (!sceneEl) return;
+    sceneEl.exitVR().then(after, after);
+  };
+
+  const vrNoticeContent = (notice: VRNotice): { title: string; message: string; actions: VRNoticeAction[] } => {
+    const cancel: VRNoticeAction = { label: 'Batal', onClick: () => setVrNotice(null) };
+    const { hotspot } = notice;
+    return {
+      title: hotspot.label || 'Tautan eksternal',
+      message: 'Tautan ini dibuka di browser, di luar tur VR. Keluar dari Mode VR untuk membukanya.',
+      actions: [
+        cancel,
+        {
+          label: 'Keluar VR',
+          primary: true,
+          // A real click on the link afterwards (not window.open from here) —
+          // popup blockers don't treat the end of a VR session as a user gesture.
+          onClick: () =>
+            exitVRThen(() =>
+              setToast({
+                message: hotspot.label || 'Tautan eksternal',
+                href: hotspot.url,
+                newTab: hotspot.open_in_new_tab !== false,
+              }),
+            ),
+        },
+      ],
+    };
+  };
+
+  // Restricted-area login handlers. `login()` (lib/api.ts) already marks the
+  // session unlocked (+ stores the bearer token) before this fires.
   const onLoginSuccess = () => {
-    writeUnlocked();
     setLoginOpen(false);
     const target = pendingSceneId;
     setPendingSceneId(null);
@@ -473,6 +744,20 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
   // First room by order_index — no hardcoded fallback; simply a no-op until sceneList loads.
   const mainSceneId = sceneList[0]?.id;
 
+  // One VR panel at a time: opening a menu panel closes whatever else is up.
+  const closeVrPanels = () => {
+    setActiveCollectionId(null);
+    setActivePhotoHotspot(null);
+    setVrNotice(null);
+    setGalleryOpen(false);
+    setFloorplanOpen(false);
+    setGuideOpen(false);
+  };
+  const closeGuide = () => {
+    stopGuideAudio();
+    setGuideOpen(false);
+  };
+
   return (
     <div ref={containerRef} className="fixed inset-0 bg-black">
       <a-scene
@@ -480,6 +765,18 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         vr-mode-ui="enabled: true"
         loading-screen="enabled: false"
         renderer="colorManagement: true; antialias: false; precision: medium"
+        // 'local' (not A-Frame's default 'local-floor'): the XR origin is the
+        // visitor's own head, so their eyes sit at the center of the panorama
+        // sphere like the desktop camera does. With 'local-floor' the headset
+        // reports the real standing height (~1.6m) and every hotspot drifts off
+        // the object it marks in the photo.
+        // 'hand-tracking': the Quest only reports tracked hands (and their pinch
+        // = select) to a page that asks for them — without it, putting the
+        // controllers down leaves the visitor with no way to point at anything.
+        webxr="referenceSpaceType: local; requiredFeatures: local; optionalFeatures: hand-tracking"
+        // A-Frame's "F" shortcut calls enterVR() directly, bypassing the headset
+        // check in enterVR below (and freezing the view on a desktop).
+        keyboard-shortcuts="enterVR: false"
         style={{ width: '100%', height: '100%' }}
       >
         <a-entity ref={skyRef} sky-crossfade="" />
@@ -496,15 +793,15 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
           look-controls="mouseEnabled: false; touchEnabled: false"
           wasd-controls="enabled: false"
         >
-          {/* Gaze dot/reticle — ONLY for VR mode (Cardboard); on desktop it's
-              hidden & its raycaster is off (clicking is done with the mouse directly). */}
+          {/* Gaze reticle — shown by xr-pointer only in VR when there is no
+              controller/hand to point with (e.g. Cardboard). Purely visual: the
+              dwell-to-click logic lives in xr-pointer. */}
           <a-entity
-            ref={cursorRef}
+            id="vr-gaze-reticle"
             visible="false"
-            cursor="fuse: true; fuseTimeout: 1000"
-            raycaster="objects: .clickable; enabled: false"
+            vr-layer="order: 25"
             position="0 0 -1"
-            geometry="primitive: ring; radiusInner: 0.015; radiusOuter: 0.025"
+            geometry="primitive: ring; radiusInner: 0.012; radiusOuter: 0.02"
             material="color: #ffffff; shader: flat; opacity: 0.9"
           />
 
@@ -516,12 +813,125 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         {/* Held back during the intro so the hotspots play their grow-in animation
             when the planet finishes unrolling, rather than popping in fully grown
             behind the intro quad. */}
-        {hotspotsVisible && activeScene && !introPlaying && (
-          <HotspotLayer
-            key={activeScene.id}
-            hotspots={activeScene.hotspots}
-            onNavigate={navigateTo}
-            onInfo={setActiveCollectionId}
+        {/* Turned together with the panorama (worldYaw, VR only) so hotspots
+            stay on the objects they mark. */}
+        <a-entity rotation={`0 ${worldYaw} 0`}>
+          {hotspotsVisible && activeScene && !introPlaying && (
+            <HotspotLayer
+              key={activeScene.id}
+              hotspots={visibleHotspots}
+              onNavigate={navigateTo}
+              onInfo={(id) => {
+                if (guideOpen) closeGuide();
+                setActiveCollectionId(id);
+              }}
+              onPhoto={(h) => {
+                if (guideOpen) closeGuide();
+                setActivePhotoHotspot(h);
+              }}
+              onExternalLink={openExternal}
+            />
+          )}
+        </a-entity>
+
+        {/* Controller/hand lasers + trigger/pinch clicks inside an XR session. */}
+        <a-entity xr-pointer="reticle: #vr-gaze-reticle" />
+        {/* What the visitor holds, drawn in VR — visual only, all clicking goes
+            through xr-pointer above. Quest Touch controller models while
+            controllers are in use; the visitor's own tracked hands (like in the
+            Quest home) while using hand tracking. Each shows only while that
+            kind of input is active. */}
+        <a-entity meta-touch-controls="hand: left" vr-hand-style="" />
+        <a-entity meta-touch-controls="hand: right" vr-hand-style="" />
+        <a-entity hand-tracking-controls="hand: left; modelColor: #e8eefc; modelOpacity: 0.9" vr-hand-style="" />
+        <a-entity hand-tracking-controls="hand: right; modelColor: #e8eefc; modelOpacity: 0.9" vr-hand-style="" />
+
+        {/* In-headset panels (HTML modals are invisible during an XR session).
+            At most one at a time; the most recent request wins. */}
+        {inVR &&
+          (vrLoginSceneId ? (
+            <VRLoginPanel
+              key={vrLoginSceneId}
+              onCancel={() => setVrLoginSceneId(null)}
+              onSuccess={() => {
+                // login() has already stored the token + unlocked the area.
+                const target = vrLoginSceneId;
+                setVrLoginSceneId(null);
+                navigateTo(target);
+              }}
+            />
+          ) : vrNotice ? (
+            <VRNoticePanel key={JSON.stringify(vrNotice)} {...vrNoticeContent(vrNotice)} />
+          ) : guideOpen ? (
+            <VRGuidePanel onClose={closeGuide} />
+          ) : activePhotoHotspot ? (
+            <VRPhotoPanel
+              key={activePhotoHotspot.id}
+              hotspot={activePhotoHotspot}
+              onClose={() => setActivePhotoHotspot(null)}
+            />
+          ) : activeCollectionId ? (
+            <VRInfoPanel
+              key={activeCollectionId}
+              collectionId={activeCollectionId}
+              onClose={() => setActiveCollectionId(null)}
+            />
+          ) : galleryOpen ? (
+            <VRLocationsPanel
+              scenes={sceneList}
+              currentId={activeScene?.id ?? null}
+              onSelect={(id) => {
+                setGalleryOpen(false);
+                navigateTo(id);
+              }}
+              onClose={() => setGalleryOpen(false)}
+            />
+          ) : floorplanOpen ? (
+            <VRFloorplanPanel
+              scenes={sceneList}
+              currentId={activeScene?.id ?? null}
+              onSelect={(id) => {
+                setFloorplanOpen(false);
+                navigateTo(id);
+              }}
+              onClose={() => setFloorplanOpen(false)}
+            />
+          ) : null)}
+
+        {/* The footer bar's actions: a small "Menu" button riding on the left
+            controller / hand opens the bar in front of the chest (or B / Y).
+            Hidden while the login keyboard is up. */}
+        {inVR && !vrLoginSceneId && (
+          <VRMenuBar
+            expanded={vrMenuOpen}
+            onToggleMenu={() => setVrMenuOpen((v) => !v)}
+            hotspotsVisible={hotspotsVisible}
+            open={guideOpen ? 'guide' : galleryOpen ? 'locations' : floorplanOpen ? 'floorplan' : null}
+            onMainLocation={() => {
+              if (mainSceneId) navigateTo(mainSceneId);
+            }}
+            // The bar gets out of the way once a panel opens (it would sit
+            // right under it); Show/Hide Hotspot keeps it so the effect is seen.
+            onAllLocations={() => {
+              const opening = !galleryOpen;
+              closeVrPanels();
+              setGalleryOpen(opening);
+              setVrMenuOpen(false);
+            }}
+            onFloorplan={() => {
+              const opening = !floorplanOpen;
+              closeVrPanels();
+              setFloorplanOpen(opening);
+              setVrMenuOpen(false);
+            }}
+            onToggleHotspots={() => setHotspotsVisible((v) => !v)}
+            onGuide={() => {
+              const opening = !guideOpen;
+              closeVrPanels();
+              setGuideOpen(opening);
+              setVrMenuOpen(false);
+            }}
+            onExitVR={() => getSceneEl()?.exitVR()}
           />
         )}
 
@@ -577,7 +987,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         onToggleHotspots={() => setHotspotsVisible((v) => !v)}
       />
 
-      {floorplanOpen && (
+      {!inVR && floorplanOpen && (
         <FloorplanMap
           scenes={sceneList}
           currentId={activeScene?.id ?? null}
@@ -594,7 +1004,7 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         />
       )}
 
-      {galleryOpen && (
+      {!inVR && galleryOpen && (
         <SceneGallery
           scenes={sceneList}
           currentId={activeScene?.id ?? null}
@@ -606,8 +1016,45 @@ export default function VRScene({ initialSceneId }: { initialSceneId: string }) 
         />
       )}
 
-      {activeScene && activeCollectionId && (
+      {!inVR && activeScene && activeCollectionId && (
         <HotspotInfo collectionId={activeCollectionId} onClose={() => setActiveCollectionId(null)} />
+      )}
+
+      {!inVR && activeScene && activePhotoHotspot && (
+        <HotspotPhotoModal hotspot={activePhotoHotspot} onClose={() => setActivePhotoHotspot(null)} />
+      )}
+
+      {/* Toast — e.g. "no headset detected", or the link to open after leaving VR */}
+      {toast && (
+        <div className="pointer-events-none absolute inset-x-0 top-24 z-40 flex justify-center px-4 md:top-6">
+          <div
+            role="status"
+            className="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[#161d33]/95 px-4 py-3 text-sm text-white shadow-2xl backdrop-blur-md"
+          >
+            <p className="flex-1 leading-relaxed">
+              {toast.message}
+              {toast.href && (
+                <a
+                  href={toast.href}
+                  target={toast.newTab ? '_blank' : '_self'}
+                  rel="noopener noreferrer"
+                  onClick={() => setToast(null)}
+                  className="mt-2 block font-semibold text-amber-400 hover:text-amber-300"
+                >
+                  Buka tautan →
+                </a>
+              )}
+            </p>
+            <button
+              type="button"
+              onClick={() => setToast(null)}
+              aria-label="Tutup pesan"
+              className="-mr-1 rounded-full px-2 text-white/60 transition hover:text-white"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Transition curtain — black fade when switching/entering rooms */}

@@ -15,7 +15,7 @@ This app lets users explore every room of the FK UB Anatomy Museum virtually thr
 - Multi-room 360° virtual tour (Lobby, Basic Anatomy, Osteology, Internal Organs, Histology, Embryology)
 - Room-to-room navigation via hotspots and a museum floor plan / map
 - Collection info hotspots — photos, description, voice-over, and a link to the Web Portal
-- VR Mode (WebXR / Google Cardboard) via a toggle button
+- VR Mode (WebXR) for standalone headsets such as **Meta Quest** — see [VR headsets](#vr-headsets-meta-quest)
 - A unique URL per room (`/vr/osteologi`) — shareable and bookmarkable
 - All content managed from a centralized CMS, never hardcoded
 
@@ -104,6 +104,75 @@ npm run start
 ```
 
 Deployment to the UB server uses Nginx. Configuration details will follow once the server is ready.
+
+---
+
+## VR Headsets (Meta Quest)
+
+"Mode VR" starts an immersive WebXR session. It only works in a browser that
+has a VR headset behind it — e.g. the **Meta Quest Browser** on the headset
+itself (or a PC browser with Quest Link). On a normal laptop/phone browser the
+button explains that no headset was detected instead of entering VR.
+
+Requirements:
+- The site must be served over **HTTPS** (browsers only expose WebXR in a secure context; `localhost` also counts).
+- Panoramas load into WebGL, so their server must send **CORS** headers (`Access-Control-Allow-Origin`). Collection photos in the VR panels don't need it: they are loaded through the app's own origin (Next image optimizer, or the `/api/vr-image` pass-through limited to the backend's hosts — add other photo hosts to `VR_IMAGE_HOSTS`).
+
+Inside the headset:
+| Input | Point | Activate |
+|---|---|---|
+| Touch controllers | laser from the controller | trigger |
+| Hand tracking | laser from the hand | pinch |
+| No controller/hand (e.g. Cardboard) | dot in the center of view | look at a hotspot for 1s |
+
+**Guide (Panduan).** When VR starts at — or first arrives at — the Main
+Location, a step-by-step tutorial opens in front of the visitor: an animated
+illustration, short text and a recorded voice-over per step, in a **controller**
+track and a **hand-tracking** track (it follows whichever is in use and can be
+switched). It opens in **every VR session** (each press of "Mode VR" — the
+headset is shared by many visitors), once per session: going back to the Main
+Location doesn't repeat it. *Lewati* skips it and the menu's
+**Panduan** button reopens it. Wording lives in `lib/vrGuide.ts`; the recording
+script and file names are in [docs/VR-GUIDE-VOICEOVER.md](docs/VR-GUIDE-VOICEOVER.md)
+and the MP3s are in `public/audio/guide/` (steps without a file play silently).
+The voice-over is **spatial audio**: it is heard coming from the guide panel
+(Web Audio HRTF panner placed at the panel, listener following the headset), so
+it stays put as the visitor turns — turning away puts it behind them, which
+draws them back to the panel.
+
+The menu (Main Location, All Location, Denah, Show/Hide Hotspot, Panduan, Keluar VR —
+the same actions as the 2D footer bar) is **closed by default**. A small
+**Menu** button floats just above the **left controller / left hand** (like a
+Quest wrist menu), so it is always within reach and never in front of a
+hotspot. Opening it shows the bar in front of the chest; it closes again after
+use and when you move to another room.
+| Input | Open / close the menu |
+|---|---|
+| Touch controllers | **B** or **Y** — or right laser + trigger on the Menu button |
+| Hand tracking | **tap it with your right index finger** — or right-hand laser + pinch |
+| No controller/hand | look at the Menu button (floating low in front) for 1s |
+
+Hands and controllers are drawn in VR: your tracked hands (like in the Quest
+home) or the Touch controller models. With hand tracking, menu, panel and
+keyboard buttons can be **touched directly with a fingertip** — like the Quest's
+own keyboard — and those panels open within arm's reach (scaled so they look the
+same size). The hand's laser steps aside while the finger is near a button.
+
+In the emulator's Play mode the controllers are fixed to your view, so use
+right Shift (B) / Z (Y) to open the menu.
+
+Arriving in a room, its intended view (`initial_yaw`) is placed **wherever you
+are facing** — the room (panorama and hotspots together) is turned to you, the
+way the 2D view re-centers, instead of forcing the headset camera.
+
+Info/photo hotspots open a panel **inside VR** (HTML modals are invisible in a
+headset). The restricted-area login also works inside VR: a virtual keyboard
+is typed on with the laser (trigger) or a pinch — a paired Bluetooth keyboard
+works too — and it uses the same backend login as the website form. External
+links can't open inside VR, so the visitor is offered to leave VR for them.
+
+Testing without a headset: the [Immersive Web Emulator](https://chromewebstore.google.com/detail/immersive-web-emulator/cgffilbpcibhmcfbgggfhfolhkfbhmik)
+browser extension (by Meta) emulates a Quest, including controllers and hands.
 
 ---
 

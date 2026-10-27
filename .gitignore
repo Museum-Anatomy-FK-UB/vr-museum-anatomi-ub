@@ -36,6 +36,10 @@ tsconfig.tsbuildinfo
 
 # Aset 360° resolusi tinggi — JANGAN commit ke Git (pakai storage server).
 # Folder & README tetap di-track; file gambarnya diabaikan.
+# Pengecualian: /panorama/kompress/ berisi versi terkompresi (~1-3MB per foto,
+# bukan resolusi tinggi asli) yang dipakai langsung oleh app, jadi di-track.
 /public/panorama/*
 !/public/panorama/.gitkeep
 !/public/panorama/README.md
+!/public/panorama/kompress/
+!/public/panorama/kompress/*

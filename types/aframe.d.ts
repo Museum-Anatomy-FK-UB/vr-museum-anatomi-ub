@@ -21,6 +21,7 @@ declare global {
       'a-triangle': AFrameElement;
       'a-image': AFrameElement;
       'a-plane': AFrameElement;
+      'a-box': AFrameElement;
       'a-assets': AFrameElement;
       'a-asset-item': AFrameElement;
     }

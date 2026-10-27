@@ -19,10 +19,13 @@ const ALL_ORDER = [...PUBLIC_ORDER, ...RESTRICTED_ORDER];
 
 // One-off door-opening frame shown in place before entering Ruang 1 — frontend
 // only (not captured by the editor), re-attached to the Lobby's door hotspot here.
-const LOBBY_DOOR_OPEN_URL = '/panorama/lobby/lobby-animation-open.JPG';
+const LOBBY_DOOR_OPEN_URL = '/panorama/kompress/lobby-animation-open.JPG';
 
+// Compressed panoramas (public/panorama/kompress/) — same filenames as the
+// original scenes/lobby folders but much smaller (e.g. ~5MB -> ~800KB), used
+// for faster loading in production.
 function panoramaUrl(slug: string): string {
-  return slug === 'lobby' ? '/panorama/lobby/lobby.JPG' : `/panorama/scenes/${slug}.JPG`;
+  return `/panorama/kompress/${slug}.JPG`;
 }
 
 function roomTitle(slug: string): string {
