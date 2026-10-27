@@ -4,10 +4,13 @@ Draft of the endpoints the Web VR needs. This document was written by the VR tea
 as a **proposal to the Backend team (Azkal / Akmal)** to be reviewed and
 implemented.
 
-> **Status:** Implemented — the VR frontend now consumes this live (see
-> `NEXT_PUBLIC_API_BASE_URL`). One deviation from the original draft below:
-> the collection endpoint actually implemented is `GET /api/vr/collections/:id`
-> (not `/api/collections/:id` as first drafted) — updated below to match.
+> **Status:** Implemented — the VR frontend consumes this live (see
+> `NEXT_PUBLIC_API_BASE_URL`). Deviations from the original draft below:
+> the collection endpoint is `GET /api/vr/collections/:id` (not
+> `/api/collections/:id`); hotspots can also be of type `photo` and
+> `external_link`; and restricted rooms require a login (see **4. Authentication**).
+> The items that were first proposed as additions (`horizon_roll`, `variant`,
+> `arrow_deg`, `transition_url`) are now implemented by the backend.
 
 ---
 
@@ -16,7 +19,7 @@ implemented.
 | Environment | URL |
 |---|---|
 | Development | `http://localhost:8000/api` |
-| Production | `https://museumanatomi.ub.ac.id/api` |
+| Production (current deployment) | `https://museum-ub.realitas.id/api` |
 
 Configured via `NEXT_PUBLIC_API_BASE_URL` in `.env.local`.
 
@@ -101,6 +104,8 @@ Used when the user opens `/vr/[sceneId]`.
 **`hotspot.type` field:**
 - `navigation` — moves to another room (`target_scene_id` is required)
 - `info` — opens the collection info panel (`collection_id` is required, `arrow` is not used)
+- `photo` — opens a single photo in a lightbox (`media_url` is required, `caption` is optional)
+- `external_link` — opens another website (`url` is required, `open_in_new_tab` is optional and defaults to `true`)
 
 **Hotspot position fields:**
 - `yaw` — horizontal rotation in degrees (-180 to 180)
@@ -144,16 +149,35 @@ the Multimedia App (single source of truth, no duplication).
 > Note: example values (names, descriptions, captions) are shown in Indonesian
 > because that's the actual content language the API will serve.
 
-> **As implemented by the backend** (backend API documentation, Oct 2026) the
-> field names differ from the draft above:
-> `GET /api/vr/collections/{slug|uuid}` → `{ id: <uuid>, slug_name, name_common, name_latin, description, media_assets: [{ url, type }] }`,
-> and the full item is `GET /api/multimedia/{uuid}` → `{ name_common, detail: { general_description, … }, photos: [{ url, caption, order }] }`.
+> **As implemented by the backend** (checked against the live API on 2026-10-27):
+> `GET /api/vr/collections/{slug|uuid}` returns the field names of this contract —
+> `name`, `latin_name`, `category`, `description`, `photos: [{ url, caption }]`,
+> `audio_url`, `video_url`, `portal_url` — plus `slug_name`. Its `id` is the item's
+> UUID. The full item is `GET /api/multimedia/{uuid}` →
+> `{ name_common, detail: { general_description, … }, photos: [{ url, caption, order }] }`.
 > The VR info panel shows only **images, title and general description**:
 > `lib/api.ts` (`getCollection`) resolves the hotspot's `collection_id` via the
-> VR endpoint, then reads `name_common`, `detail.general_description` and
-> `photos` from `/multimedia/{uuid}`, falling back to the VR endpoint's
-> `description` / `media_assets` (images only) — and to the draft field names
-> above — whenever a value is missing.
+> VR endpoint, then prefers `name_common`, `detail.general_description` and the
+> ordered `photos` from `/multimedia/{uuid}`, falling back to the VR endpoint's
+> `name` / `description` / `photos` — and to the older field names
+> (`name_common`, `media_assets`) — whenever a value is missing.
+> At the time of that check, the sampled collections had no `audio_url` and an
+> empty `portal_url`, so the voice-over and the Web Portal link only appear once
+> the backend fills them.
+
+---
+
+## 4. Authentication (restricted rooms)
+
+Rooms whose slug starts with `restricted-` are protected.
+
+- `POST /api/login` with `{ "email": "…", "password": "…" }` returns a Laravel
+  Sanctum bearer `token` (`lib/api.ts` → `login()`).
+- `GET /api/vr/scenes/{slug}` for a restricted room needs
+  `Authorization: Bearer <token>`. Without it the backend answers `401` (checked
+  for `restricted-18` and `restricted-26`, with `Accept: application/json`).
+- The frontend keeps the token in `sessionStorage` (`vr-auth-token`) for the
+  browser session only, and clears it when a request returns `401`.
 
 ---
 
@@ -167,7 +191,7 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | string | yes | Stable slug, used in the URL (`/vr/:id`). The backend's actual primary key is a UUID with the slug in a separate `slug_name` field — the VR client remaps `id` to `slug_name` on receipt so URLs stay readable; either form works when querying the backend directly |
+| `id` | string | yes | Stable slug, used in the URL (`/vr/:id`). The backend returns the slug as `id` (also available as `slug_name`); either the slug or the UUID works when querying the backend directly. The client does not remap ids |
 | `title` | string | yes | Room name shown on cards & floor plan |
 | `thumbnail_url` | string (URL) | yes | Small image for landing cards, not the full 360° photo |
 | `order` | number | yes | Display order in the room list |
@@ -184,14 +208,14 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `initial_yaw` | number (-180 to 180) | yes | Camera's starting horizontal angle when the room loads — set this so the visitor arrives facing the interesting content/next hotspot, not a blank wall or the way they came from |
 | `initial_pitch` | number (-90 to 90) | yes (per current frontend type) | **Not read by any current rendering logic** — camera always starts level regardless of this value. Reserved for a future vertical-start-angle feature; safe to always send `0` |
 | `hotspots` | array | yes | Can be empty `[]` |
-| `horizon_roll` | number (degrees), optional | no | **Proposed addition, not yet implemented by backend** — see "Proposed additions" below |
+| `horizon_roll` | number (degrees), optional | no | Horizon tilt correction; omitted or `0` = no correction. Implemented by the backend — see "Additions" below |
 
 ### Hotspot
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `id` | string | yes | Unique within the scene |
-| `type` | `"navigation"` \| `"info"` | yes | |
+| `type` | `"navigation"` \| `"info"` \| `"photo"` \| `"external_link"` | yes | |
 | `yaw` | number (-180 to 180) | yes | |
 | `pitch` | number (-90 to 90) | yes | |
 | `label` | string | yes | Shown as a text caption above the hotspot |
@@ -199,7 +223,12 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 | `variant` | `"arrow"` \| `"door"` | no | Navigation only. `door` = upright, camera-facing coin for an entrance/door; `arrow` (default) = tilted floor-marker. See **Proposed Additions** |
 | `arrow_deg` | number (0–360) | no | Navigation only. Free arrow rotation in degrees; overrides `arrow` when set. See **Proposed Additions** |
 | `target_scene_id` | string | required if `type: navigation` | Must match an existing `Scene.id` — see referential integrity note below |
-| `collection_id` | string | required if `type: info` | Must match an existing `Collection.id` |
+| `collection_id` | string | required if `type: info` | Must match an existing `Collection.id`. An info hotspot without one is hidden by the frontend |
+| `transition_url` | string (URL) | no | Navigation only. One-off image (e.g. a door opening) shown in place before the crossfade |
+| `media_url` | string (URL) | required if `type: photo` | The photo opened in the lightbox |
+| `caption` | string | no | Photo hotspots only. Falls back to `label` |
+| `url` | string (URL) | required if `type: external_link` | The website to open |
+| `open_in_new_tab` | boolean | no | External links only. Defaults to `true` |
 
 ### Collection (`GET /api/vr/collections/:id`)
 
@@ -217,11 +246,14 @@ angles, dangling IDs) will render incorrectly or silently break a hotspot.
 
 ---
 
-## Proposed Additions (2026-08-06, not yet implemented by backend)
+## Additions (proposed 2026-08-06, now implemented by the backend)
 
 Found while walking the real photos locally (`/dev/calibrate` — see that tool's
 comments). All are optional/additive — omitting any is safe and falls back to
-current behavior (no roll correction, tilted 4-way arrows, no transition frame).
+default behavior (no roll correction, tilted 4-way arrows, no transition frame).
+The backend now returns all four (checked on 2026-10-27: `horizon_roll` on every
+public room, and `variant`, `arrow_deg`, `transition_url` on every navigation
+hotspot — `transition_url` is only filled for the Lobby door).
 
 ### `Scene.horizon_roll` (number, degrees, optional)
 
@@ -267,10 +299,10 @@ Ignored for the `door` variant. Captured with the slider in `/dev/calibrate`.
 
 Lets a navigation hotspot show a one-off image (e.g. a door opening) in place
 before crossfading to the target room, instead of navigating instantly.
-Currently only used for the Lobby → Ruang 1 entrance. If this is useful
-elsewhere, it'd need a `vr_hotspots.transition_url` column (nullable); for now
-it's handled as frontend-only data (`lib/localPreviewData.ts`) since it's a
-single case — raise it with the backend team only if more rooms need it.
+Currently only used for the Lobby → Ruang 1 entrance, and the backend now
+serves it (`transition_url` on the Lobby door hotspot). The local preview still
+attaches the same frame in `lib/localPreviewData.ts`. If more rooms need it, fill
+the field on those hotspots — no frontend change is required.
 
 ---
 
@@ -331,7 +363,7 @@ That editing UI is out of scope for this repo; the VR team just needs to know:
 ## Notes for the Backend Team
 
 1. **CORS** — `panorama_url` and all asset URLs must be absolute URLs or paths
-   reachable from the VR domain (`vr.museumanatomi.ub.ac.id`). This needs CORS
+   reachable from the VR domain (currently `museum.anatomi360.realitas.id`). This needs CORS
    configuration on the server.
 
 2. **Caching** — The `/api/vr/scenes` endpoint should be cached aggressively
@@ -344,7 +376,8 @@ That editing UI is out of scope for this repo; the VR team just needs to know:
    not be a separate collection table just for VR.
 
 4. **Parallel development** — Done. The VR frontend has switched to the live
-   API via `NEXT_PUBLIC_API_BASE_URL`; the local mock layer has been removed.
+   API via `NEXT_PUBLIC_API_BASE_URL`. Only a dev-only local preview
+   (`NEXT_PUBLIC_LOCAL_PREVIEW=true`) remains, and it stays off in deployments.
 
 5. **Error handling** — Please be consistent: use the correct HTTP status codes
    for error responses (404 for scene/collection not found, 500 for server
