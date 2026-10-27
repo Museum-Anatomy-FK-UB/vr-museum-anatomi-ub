@@ -4,7 +4,8 @@
 
 This app lets users explore every room of the FK UB Anatomy Museum virtually through the browser, anytime and anywhere, without visiting the physical location. Interactive hotspots surface anatomy collection information pulled dynamically from the ecosystem's centralized database.
 
-> **Status:** In development — now consuming the real backend API (Laravel); pending production 360° photo/collection assets from FK.
+> **Live:** [museum.anatomi360.realitas.id/vr/lobby](https://museum.anatomi360.realitas.id/vr/lobby)
+> **Status:** In development — consuming the deployed backend API (Laravel, `https://museum-ub.realitas.id/api`). Rooms, hotspots and collections are managed in the backend CMS, never in this repo.
 > **PIC:** Anak Agung Ngurah Aditya Wirayudha
 > **Part of:** [Digital Ecosystem of the FK UB Anatomy Museum](https://museumanatomi.ub.ac.id) — MGM Lab, FILKOM UB
 
@@ -12,12 +13,22 @@ This app lets users explore every room of the FK UB Anatomy Museum virtually thr
 
 ## Key Features
 
-- Multi-room 360° virtual tour (Lobby, Basic Anatomy, Osteology, Internal Organs, Histology, Embryology)
-- Room-to-room navigation via hotspots and a museum floor plan / map
-- Collection info hotspots — photos, description, voice-over, and a link to the Web Portal
-- VR Mode (WebXR) for standalone headsets such as **Meta Quest** — see [VR headsets](#vr-headsets-meta-quest)
-- A unique URL per room (`/vr/osteologi`) — shareable and bookmarkable
-- All content managed from a centralized CMS, never hardcoded
+- **Multi-room 360° tour** — the Lobby and Ruang 1–17 are public; 9 more rooms (`restricted-18` … `restricted-26`) sit behind a login. The entry room is whichever room the API orders first.
+- **Hotspots from the API**, in four types:
+  - `navigation` — move to another room (arrow marker, or an upright *door* marker; a door can show a one-off "door opening" frame before the crossfade)
+  - `info` — collection panel with photos, name, description and voice-over
+  - `photo` — a single photo in a lightbox
+  - `external_link` — opens another website (in VR the visitor is offered to leave VR first)
+  - Info hotspots with no linked collection, and the placeholder labels "Hotspot N", are hidden.
+- **"Little Planet" intro** on the first room of a visit, then smooth crossfade/zoom transitions between rooms.
+- **Footer bar** — Main Location, All Location (room gallery), Denah (floor plan), Fullscreen, Mode VR, Show/Hide Hotspot.
+- **Look and zoom** — drag/touch to look with inertia, mouse wheel to zoom (FOV 40–100°), arrow keys (see below), and a slow auto-rotate after 4 s without input.
+- **Restricted area** — rooms whose slug starts with `restricted-` ask for a login (Laravel Sanctum bearer token, kept for the browser session only).
+- **VR Mode (WebXR)** for standalone headsets such as **Meta Quest**, with controllers or hand tracking, an in-VR menu, tutorial guide with voice-over, and in-VR panels — see [VR headsets](#vr-headsets-meta-quest).
+- **A unique URL per room** (`/vr/lobby`, `/vr/3`, …) — shareable and bookmarkable.
+- **All content managed from the centralized CMS**, never hardcoded.
+
+Keyboard (desktop): **←/→** turn the view; **↑/↓** activate the hotspot you are turned toward (or away from).
 
 ---
 
@@ -25,14 +36,14 @@ This app lets users explore every room of the FK UB Anatomy Museum virtually thr
 
 | Layer | Technology |
 |---|---|
-| Framework | Next.js 14 (App Router) |
-| VR / 360° Engine | A-Frame 1.5+ |
-| 3D Renderer | Three.js (A-Frame dependency) |
+| Framework | Next.js 14 (App Router), TypeScript |
+| VR / 360° Engine | A-Frame 1.8 |
+| 3D Renderer | Three.js r184 (A-Frame dependency) |
 | Styling | Tailwind CSS |
 | Data Fetching | SWR + Fetch API |
 | Backend / API | Laravel REST API (built by the Backend team) |
 | Database | MySQL (centralized, shared across the whole ecosystem) |
-| Deployment | Nginx — UB Server (`vr.museumanatomi.ub.ac.id`) |
+| Deployment | Node.js app (`server.js`) on cPanel hosting — [museum.anatomi360.realitas.id](https://museum.anatomi360.realitas.id/vr/lobby) |
 
 ---
 
@@ -42,11 +53,20 @@ See [`docs/STRUCTURE.md`](docs/STRUCTURE.md) for the full guide.
 
 ```
 vr-museum-anatomi-ub/
-├── app/                  # Next.js App Router (pages & layout)
-├── components/           # React / A-Frame components
-├── lib/                  # Utilities, API client, hooks
-├── public/               # Static assets (360° placeholders, etc.)
-├── docs/                 # Technical documentation
+├── app/
+│   ├── vr/                 # /vr (redirects to the first room) and /vr/[sceneId]
+│   ├── api/vr-image/       # same-origin pass-through for collection photos shown in VR
+│   └── dev/calibrate/      # dev-only hotspot calibration tool (404 in production)
+├── components/
+│   ├── vr/                 # A-Frame scene, hotspots, VR input/menu/panels/guide
+│   ├── ui/                 # generic UI (gallery, audio player, loading)
+│   └── dev/                # calibration tool
+├── lib/                    # API client (api.ts), types, SWR hooks, VR guide content, seed data
+├── public/
+│   ├── panorama/           # compressed local panoramas + logos (see its README)
+│   └── audio/guide/        # recorded voice-over of the VR tutorial
+├── docs/                   # Technical documentation
+├── server.js               # entry point for the cPanel Node.js app
 └── ...
 ```
 
@@ -57,14 +77,16 @@ vr-museum-anatomi-ub/
 | File | Contents |
 |---|---|
 | [`docs/STRUCTURE.md`](docs/STRUCTURE.md) | Folder structure guide & code conventions |
-| [`docs/API.md`](docs/API.md) | API endpoint contract (to align with the Backend team) |
-| [`CLAUDE.md`](CLAUDE.md) | Project context for the AI assistant |
+| [`docs/API.md`](docs/API.md) | API endpoint contract drafted with the Backend team |
+| [`docs/HANDOFF-BACKEND-VR-DATA.md`](docs/HANDOFF-BACKEND-VR-DATA.md) | Notes handed to the Backend team about VR data |
+| [`docs/VR-GUIDE-VOICEOVER.md`](docs/VR-GUIDE-VOICEOVER.md) | Recording script for the VR tutorial voice-over |
+| [`public/panorama/README.md`](public/panorama/README.md) | Panorama requirements and local test assets |
 
 ---
 
 ## Development Setup
 
-> Prerequisites: Node.js 18+, npm / pnpm
+> Prerequisites: Node.js 18.17+ (production runs Node 20), npm
 
 ```bash
 # 1. Clone the repository
@@ -76,20 +98,34 @@ npm install
 
 # 3. Copy the environment file
 cp .env.example .env.local
-# Edit .env.local — set API_BASE_URL, etc.
+# Edit .env.local — see the table below
 
 # 4. Run the development server
 npm run dev
 # Open http://localhost:3000
 ```
 
+Other scripts: `npm run build`, `npm run start`, `npm run lint`.
+
 ### Environment Variables
 
-```env
-# .env.local
-NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api    # Backend API URL (local)
-NEXT_PUBLIC_STORAGE_URL=http://localhost:8000/storage # File storage URL
-```
+| Variable | Purpose |
+|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Backend API base URL — live: `https://museum-ub.realitas.id/api`, local: `http://localhost:8000/api` |
+| `NEXT_PUBLIC_STORAGE_URL` | Backend file storage URL — its host is allowed for the `/api/vr-image` pass-through |
+| `NEXT_PUBLIC_LOCAL_PREVIEW` | **Dev only.** `true` serves `lib/localPreviewData.ts` and the bundled panoramas instead of calling the backend. Leave it unset or `false` for anything deployed. |
+| `VR_IMAGE_HOSTS` | Optional, server-side. Extra hosts (comma-separated) whose photos `/api/vr-image` may fetch for VR panels. The API and storage hosts are always allowed. |
+
+> `NEXT_PUBLIC_*` values are **inlined at build time**. Changing them on the server has no effect on an already built app — rebuild with the right `.env.local`.
+
+### Dev tools
+
+- **`/dev/calibrate`** — place hotspots visually on the local panoramas, tune each room's start direction and horizon tilt, and export JSON for the Backend team to seed. Works only in development.
+- **`lib/calibrationSeed.ts`** — the bundled calibration data shared by the tool and the local preview.
+
+### Panorama assets
+
+The live tour loads panoramas from the URLs the API returns. `public/panorama/kompress/` holds compressed copies (5760×2880, roughly 0.7–2.7 MB each) used by the local preview; the original high-resolution photos stay out of Git (see `.gitignore`).
 
 ---
 
@@ -103,7 +139,66 @@ npm run build
 npm run start
 ```
 
-Deployment to the UB server uses Nginx. Configuration details will follow once the server is ready.
+### Deploying to cPanel (Node.js App)
+
+The live site is a cPanel **Setup Node.js App** (Node 20, startup file `server.js`, application root = this repo's clone). `server.js` wraps Next.js so Passenger can start it.
+
+1. Make sure `.env.local` on the machine that builds points at the production API (`NEXT_PUBLIC_*` are baked in) and has `NEXT_PUBLIC_LOCAL_PREVIEW` unset or `false`.
+2. Stop any `npm run dev` first, then `npm run build`. (Building while the dev server runs, or running dev on a production `.next`, corrupts the build folder — delete `.next` before going back to dev.)
+3. Zip `.next` (without `.next/cache`) **keeping Unix permissions**, upload it to the application root and extract it, replacing the old `.next`.
+4. Pull the latest source on the server (Git Version Control → *Update from Remote*) when `public/` assets, `next.config.js` or dependencies changed; run *Run NPM Install* when dependencies changed.
+5. Restart the app in **Setup Node.js App**, then hard-refresh the site.
+
+On Linux/macOS a plain `zip -r next-build.zip .next -x ".next/cache/*"` keeps permissions. On Windows do **not** use Explorer's "Compressed folder" or `Compress-Archive` — the extracted folders end up unreadable and the app fails with `EACCES`. Use this instead (Python 3, run from the repo root):
+
+<details>
+<summary>PowerShell: zip with permissions</summary>
+
+```powershell
+$env:ZIP_OUT = "$env:USERPROFILE\Desktop\next-build.zip"
+@'
+import zipfile, os, stat
+out = os.environ["ZIP_OUT"]
+names = set()
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk(".next"):
+        dirs[:] = [d for d in dirs if not (root == ".next" and d == "cache")]
+        rel = os.path.relpath(root, ".").replace(os.sep, "/")
+        parts = rel.split("/")
+        for i in range(1, len(parts) + 1):
+            d = "/".join(parts[:i]) + "/"
+            if d not in names:
+                names.add(d)
+                zi = zipfile.ZipInfo(d)
+                zi.external_attr = ((0o755 | stat.S_IFDIR) << 16) | 0x10
+                zf.writestr(zi, "")
+        for f in files:
+            zi = zipfile.ZipInfo(rel + "/" + f)
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.external_attr = (0o644 | stat.S_IFREG) << 16
+            with open(os.path.join(root, f), "rb") as fh:
+                zf.writestr(zi, fh.read())
+print("OK", out, os.path.getsize(out), "bytes")
+'@ | python -
+```
+
+</details>
+
+---
+
+## Backend API used by the app
+
+All requests go through `lib/api.ts`. The base URL is `NEXT_PUBLIC_API_BASE_URL`.
+
+| Endpoint | Used for |
+|---|---|
+| `GET /vr/scenes` | Room list (gallery, floor plan, entry room) |
+| `GET /vr/scenes/{slug}` | Room detail: panorama, start direction, horizon tilt, hotspots. Requires the bearer token for restricted rooms. |
+| `GET /vr/collections/{slug\|uuid}` | Resolves a hotspot's collection |
+| `GET /multimedia/{uuid}` | Collection name, general description and ordered photos |
+| `POST /login` | Restricted-area login (returns a Sanctum token) |
+
+The contract draft lives in [`docs/API.md`](docs/API.md). The VR app is read-only: it never writes data.
 
 ---
 
@@ -117,6 +212,7 @@ button explains that no headset was detected instead of entering VR.
 Requirements:
 - The site must be served over **HTTPS** (browsers only expose WebXR in a secure context; `localhost` also counts).
 - Panoramas load into WebGL, so their server must send **CORS** headers (`Access-Control-Allow-Origin`). Collection photos in the VR panels don't need it: they are loaded through the app's own origin (Next image optimizer, or the `/api/vr-image` pass-through limited to the backend's hosts — add other photo hosts to `VR_IMAGE_HOSTS`).
+- There is no dedicated Cardboard/stereo mode for phones: "Mode VR" needs a browser that reports `immersive-vr` support.
 
 Inside the headset:
 | Input | Point | Activate |
@@ -200,6 +296,8 @@ git commit -m "feat: add room-to-room navigation hotspot"
 git push origin feature/feature-name
 ```
 
+Releases go from `develop` to `main` through a Pull Request.
+
 Commit message convention:
 ```
 feat:     new feature
@@ -233,10 +331,10 @@ This repo is **one part** of a larger ecosystem:
 
 | Product | URL | PIC |
 |---|---|---|
-| Website Portal | `museumanatomi.ub.ac.id` | Bintang Ula |
-| **360° Web VR Tour** | `vr.museumanatomi.ub.ac.id` | **Aditya** |
-| Dynamic Web AR | `ar.museumanatomi.ub.ac.id` | Azarya |
-| Multimedia App | — | Belva |
+| Website Portal | [museumanatomi.ub.ac.id](https://museumanatomi.ub.ac.id/) | Bintang Ula |
+| **360° Web VR Tour** | [museum.anatomi360.realitas.id/vr/lobby](https://museum.anatomi360.realitas.id/vr/lobby) | **Aditya** |
+| Dynamic Web AR | [Anatomi3D.apk](https://museumanatomi.ub.ac.id/downloads/Anatomi3D.apk) (Android app) | Azarya |
+| Multimedia App | [multimedia-anatomi.realitas.id](https://multimedia-anatomi.realitas.id/) | Belva |
 | Backend / API / DB | — | Azkal / Akmal |
 
 ---
