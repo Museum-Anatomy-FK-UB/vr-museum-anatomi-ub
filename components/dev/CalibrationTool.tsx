@@ -305,7 +305,7 @@ export default function CalibrationTool() {
           <a-camera ref={cameraRef} position="0 0 0" look-controls="reverseMouseDrag: false" wasd-controls="enabled: false" />
 
           {/* LIVE hotspot preview — same renderer as the tour. */}
-          <HotspotLayer key={roomSlug} hotspots={previewHotspots} onNavigate={() => {}} onInfo={() => {}} onPhoto={() => {}} />
+          <HotspotLayer key={roomSlug} hotspots={previewHotspots} onNavigate={() => {}} onInfo={() => {}} onPhoto={() => {}} onExternalLink={() => {}} />
 
           {/* Selection halo around the hotspot currently being edited. */}
           {selected && (

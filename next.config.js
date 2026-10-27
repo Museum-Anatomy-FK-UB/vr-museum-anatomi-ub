@@ -7,7 +7,9 @@ const nextConfig = {
     // 360°/thumbnail assets come from the server storage via absolute URLs (see docs/API.md)
     remotePatterns: [
       { protocol: 'https', hostname: '**' },
-      { protocol: 'http', hostname: 'localhost' },
+      // Some storage servers hand out http:// URLs; the VR panels load photos
+      // through the optimizer (components/vr/VRPanels.tsx loadVrImage).
+      { protocol: 'http', hostname: '**' },
     ],
   },
 };

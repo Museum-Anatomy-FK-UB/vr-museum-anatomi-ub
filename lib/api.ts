@@ -2,7 +2,7 @@
 // See docs/API.md for the contract and NEXT_PUBLIC_API_BASE_URL in .env.local.
 
 import type { Scene, SceneSummary } from '@/lib/types/tour';
-import type { Collection } from '@/lib/types/collection';
+import type { Collection, CollectionPhoto } from '@/lib/types/collection';
 import { previewCollections, previewScenes, previewSceneList } from '@/lib/localPreviewData';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -104,13 +104,79 @@ export async function getScene(sceneId: string): Promise<Scene> {
   return request<Scene>(`/vr/scenes/${sceneId}`);
 }
 
+// --- Collection (info hotspot panel) -------------------------------------------
+// The panel shows exactly three things: the images, the title and the general
+// description ("Deskripsi Umum"). The backend serves them under its own field
+// names (see the backend's API documentation):
+//   GET /vr/collections/{slug|uuid} → { id: uuid, name_common, description, media_assets[] }
+//   GET /multimedia/{uuid}          → { name_common, detail.general_description, photos[] }
+// The VR endpoint resolves the hotspot's collection_id (a slug) to the item's
+// uuid; the multimedia endpoint then supplies the general description and the
+// ordered, captioned photos. Each field falls back to the other source, so the
+// panel still works if either response lacks it (or uses the older field names).
+type RawPhoto = { url?: string | null; caption?: string | null; type?: string | null; order?: number | null };
+type RawCollection = {
+  id?: string;
+  name?: string;
+  name_common?: string;
+  description?: string;
+  general_description?: string;
+  photos?: RawPhoto[];
+  media_assets?: RawPhoto[];
+  primary_photo?: string | null;
+  primary_photo_url?: string | null;
+  detail?: { general_description?: string | null; label_title?: string | null } | null;
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Images only (media assets may also hold audio/video/3D), in the CMS order. */
+function toPhotos(list: RawPhoto[] | null | undefined): CollectionPhoto[] {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((p) => !!p?.url && (!p.type || p.type === 'image'))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((p) => ({ url: p.url as string, ...(p.caption ? { caption: p.caption } : {}) }));
+}
+
+/** The admin may store rich text: keep its paragraphs, drop the markup. */
+function plainText(value: string): string {
+  if (!/<[a-z!/]/i.test(value) || typeof DOMParser === 'undefined') return value.trim();
+  const html = value.replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|h[1-6])>/gi, '\n\n').replace(/<\/li>/gi, '\n');
+  const text = new DOMParser().parseFromString(html, 'text/html').body.textContent ?? '';
+  return text.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function normalizeCollection(id: string, vr: RawCollection, item: RawCollection | null): Collection {
+  const text = (...values: (string | null | undefined)[]) => {
+    for (const v of values) if (typeof v === 'string' && plainText(v)) return plainText(v);
+    return '';
+  };
+  let photos = toPhotos(item?.photos);
+  if (photos.length === 0) photos = toPhotos(vr.photos ?? vr.media_assets);
+  if (photos.length === 0) {
+    const primary = item?.primary_photo_url ?? vr.primary_photo_url ?? vr.primary_photo;
+    if (primary) photos = [{ url: primary }];
+  }
+  return {
+    id: vr.id ?? id,
+    name: text(item?.name_common, vr.name_common, vr.name, item?.detail?.label_title),
+    description: text(item?.detail?.general_description, vr.general_description, vr.description),
+    photos,
+  };
+}
+
 export async function getCollection(id: string): Promise<Collection> {
   if (LOCAL_PREVIEW) {
     const collection = previewCollections[id];
     if (!collection) throw new Error(`Collection "${id}" not found (local preview)`);
     return collection;
   }
-  return request<Collection>(`/vr/collections/${id}`);
+  const vr = await request<RawCollection>(`/vr/collections/${encodeURIComponent(id)}`);
+  const uuid = [vr.id, id].find((v): v is string => !!v && UUID_RE.test(v));
+  // Best-effort: without it the panel falls back to the VR endpoint's fields.
+  const item = uuid ? await request<RawCollection>(`/multimedia/${uuid}`).catch(() => null) : null;
+  return normalizeCollection(id, vr, item);
 }
 
 /**

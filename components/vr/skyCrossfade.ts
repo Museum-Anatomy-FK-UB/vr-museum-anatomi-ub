@@ -38,6 +38,12 @@ export function registerSkyCrossfade() {
       this.meshB.scale.set(-1, 1, 1);
       this.meshA.renderOrder = 0;
       this.meshB.renderOrder = 1; // drawn after A, for a consistent blend order
+      // three.js still draws a transparent mesh at opacity 0 — a full-screen fill
+      // for nothing. Only the sphere(s) actually on screen are left visible, which
+      // halves the sky's fill cost outside transitions (it matters most in a
+      // headset, where the whole sphere is drawn once per eye at 72–90 fps).
+      this.meshA.visible = false;
+      this.meshB.visible = false;
 
       this.el.setObject3D('sky-crossfade-a', this.meshA);
       this.el.setObject3D('sky-crossfade-b', this.meshB);
@@ -73,6 +79,7 @@ export function registerSkyCrossfade() {
             active.material.map = tex;
             active.material.opacity = 1;
             active.material.needsUpdate = true;
+            active.visible = true;
             // y = initial_yaw (facing on arrival), z = horizon_roll (per-photo tilt
             // correction — same convention as the /dev/calibrate tool, MUST stay
             // identical or hotspots captured there will be misaligned here).
@@ -84,6 +91,17 @@ export function registerSkyCrossfade() {
           () => resolve(),
         );
       });
+    },
+
+    /**
+     * Re-orient the panorama on screen (or the one fading in) without reloading
+     * it — used when leaving VR, where rooms may have been turned to face the
+     * visitor (see VRScene's worldYaw).
+     */
+    setYaw(this: any, rotationYDeg: number, rollZDeg = 0) {
+      const THREE = AFRAME.THREE;
+      const mesh = this.fading ? this._fadeIncoming : this.activeIsA ? this.meshA : this.meshB;
+      mesh?.rotation.set(0, THREE.MathUtils.degToRad(rotationYDeg || 0), THREE.MathUtils.degToRad(rollZDeg || 0));
     },
 
     /**
@@ -109,6 +127,8 @@ export function registerSkyCrossfade() {
             incoming.material.opacity = 0;
             incoming.rotation.set(0, THREE.MathUtils.degToRad(rotationYDeg || 0), THREE.MathUtils.degToRad(rollZDeg || 0));
             outgoing.material.opacity = 1; // ensure full baseline before fading out
+            incoming.visible = true;
+            outgoing.visible = true;
 
             this.currentSrc = url;
             this._fadeIncoming = incoming;
@@ -157,6 +177,7 @@ export function registerSkyCrossfade() {
       if (t >= 1) {
         this.fading = false;
         this._fadeOutgoing.material.opacity = 0;
+        this._fadeOutgoing.visible = false;
         this._fadeOutgoing.position.set(0, 0, 0); // reset (already invisible)
         this._pushVec = null;
         this._onFadeDone?.();
